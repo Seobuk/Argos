@@ -122,4 +122,23 @@ std::string to_json(const MassProperties& m, int indent = -1);
 // about the COM) for humanoid/robot link definitions.
 std::string toUrdfInertial(const MassProperties& m);
 
+// --- Auto digest: one-call summary used by the report generator --------------
+
+// Key dimensions + features of a part, gathered in a single pass for an
+// auto-generated measurement report.
+struct DigestResult {
+    bool ok = false;
+    std::string error;
+    int solids = 0, faces = 0, edges = 0, vertices = 0;
+    std::optional<Vec3> bboxMin, bboxMax, bboxSize;   // overall AABB (mm)
+    MassProperties mass;                              // volume/mass/COM/inertia
+    std::vector<double> cylinderDiametersMm;          // distinct, sorted descending
+};
+
+// Compute a digest of 'shape' (counts, bounding box, mass properties, and the
+// set of distinct cylindrical-face diameters). Never throws.
+DigestResult digest(const TopoDS_Shape& shape, double densityKgPerM3 = 7850.0);
+
+std::string to_json(const DigestResult& d, int indent = -1);
+
 } // namespace argos
