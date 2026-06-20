@@ -60,13 +60,26 @@ def find_conv(explicit=None):
     return None
 
 
-def render_views(conv, step, out_dir, width=1600, height=1200):
+def render_views(conv, step, out_dir, width=1600, height=1200, reuse=False):
     """Render shaded 3D images of the part fully offscreen via mayo-conv.
 
     mayo-conv writes PPM (the only format OCCT can encode without FreeImage); we
     convert to PNG with Pillow. No GUI window is shown, so this works while the
     machine is in use. Returns {view_name: png_path}; empty if rendering is
-    unavailable (the report is still generated, just without images)."""
+    unavailable (the report is still generated, just without images).
+
+    With reuse=True, an existing non-empty view_<name>.png is kept as-is (skips
+    mayo-conv) so the PPTX can be rebuilt quickly without re-rendering."""
+    images = {}
+    if reuse:
+        for name, _cam, _caption in CAMERA_VIEWS:
+            png = os.path.join(out_dir, f"view_{name}.png")
+            if os.path.isfile(png) and os.path.getsize(png) > 0:
+                images[name] = png
+        if images:
+            print(f"[argos_report] reusing {len(images)} existing render(s)")
+            return images
+
     if not conv:
         print("[argos_report] mayo-conv not found -> skipping 3D images")
         return {}
@@ -76,7 +89,6 @@ def render_views(conv, step, out_dir, width=1600, height=1200):
         print("[argos_report] Pillow not installed (pip install pillow) -> skipping 3D images")
         return {}
 
-    images = {}
     for name, cam, _caption in CAMERA_VIEWS:
         ini = os.path.join(out_dir, f"_render_{name}.ini")
         ppm = os.path.join(out_dir, f"_render_{name}.ppm")
@@ -147,6 +159,9 @@ def main():
     ap.add_argument("--cli", default=None, help="path to argos-cli.exe")
     ap.add_argument("--conv", default=None, help="path to mayo-conv.exe (offscreen renderer)")
     ap.add_argument("--no-images", action="store_true", help="skip 3D rendered images")
+    ap.add_argument("--reuse", action="store_true",
+                    help="reuse existing digest.json + view_*.png in the output folder "
+                         "(fast rebuild of the PPTX without re-measuring/re-rendering)")
     a = ap.parse_args()
 
     step = os.path.abspath(a.step)
@@ -163,27 +178,37 @@ def main():
     print(f"[argos_report] file  = {step}")
     print(f"[argos_report] out   = {out_dir}")
 
-    dg_txt, rc = run_cli(cli, ["digest", step, "--density", str(a.density), "--pretty"])
-    try:
-        dg = json.loads(dg_txt)
-    except Exception as e:
-        print("[argos_report] failed to parse digest:", e)
-        print(dg_txt[:400])
-        sys.exit(1)
-    if not dg.get("ok"):
-        print("[argos_report] digest failed:", dg.get("error"))
-        sys.exit(1)
-
-    urdf_txt, _ = run_cli(cli, ["props", step, "--density", str(a.density), "--urdf"])
-
-    with open(os.path.join(out_dir, "digest.json"), "w", encoding="utf-8") as f:
-        f.write(dg_txt)
-    with open(os.path.join(out_dir, "inertial.urdf.xml"), "w", encoding="utf-8") as f:
-        f.write(urdf_txt)
+    digest_path = os.path.join(out_dir, "digest.json")
+    urdf_path = os.path.join(out_dir, "inertial.urdf.xml")
+    dg = None
+    if a.reuse and os.path.isfile(digest_path):
+        try:
+            dg_txt = open(digest_path, encoding="utf-8").read()
+            dg = json.loads(dg_txt)
+            urdf_txt = open(urdf_path, encoding="utf-8").read() if os.path.isfile(urdf_path) else ""
+            print("[argos_report] reusing existing digest.json / inertial.urdf.xml")
+        except Exception:
+            dg = None
+    if dg is None:
+        dg_txt, rc = run_cli(cli, ["digest", step, "--density", str(a.density), "--pretty"])
+        try:
+            dg = json.loads(dg_txt)
+        except Exception as e:
+            print("[argos_report] failed to parse digest:", e)
+            print(dg_txt[:400])
+            sys.exit(1)
+        if not dg.get("ok"):
+            print("[argos_report] digest failed:", dg.get("error"))
+            sys.exit(1)
+        urdf_txt, _ = run_cli(cli, ["props", step, "--density", str(a.density), "--urdf"])
+        with open(digest_path, "w", encoding="utf-8") as f:
+            f.write(dg_txt)
+        with open(urdf_path, "w", encoding="utf-8") as f:
+            f.write(urdf_txt)
 
     images = {}
     if not a.no_images:
-        images = render_views(find_conv(a.conv), step, out_dir)
+        images = render_views(find_conv(a.conv), step, out_dir, reuse=a.reuse)
 
     pptx_path = os.path.join(out_dir, stem + "_report.pptx")
     build_pptx(dg, urdf_txt, step, a.density, a.material, pptx_path, images)
@@ -357,15 +382,29 @@ def build_pptx(dg, urdf, step, density, material, path, images=None):
                 "질량 특성을 계산할 수 없습니다 (솔리드가 아님): " + str(mass.get("error", "")),
                 size=16, color=DIM)
 
-    # ---- Slide 4: diameters ----
+    # ---- Slide 4: diameters (largest first; paginated into columns when many,
+    #      so a part with hundreds of cylinders doesn't overflow the slide) ----
     s = prs.slides.add_slide(blank)
-    title_bar(s, "주요 지름 (원통면)", fname)
+    PER_COL = 14
+    MAX_COLS = 2
+    shown = diam[:PER_COL * MAX_COLS]
+    if len(diam) <= len(shown):
+        note = f"총 {len(diam)}개"
+    else:
+        note = f"총 {len(diam)}개 중 상위 {len(shown)}개 (전체는 digest.json)"
+    title_bar(s, "주요 지름 (원통면, 큰 것부터)", f"{fname}  ·  {note}" if diam else fname)
     if diam:
-        rows = [["#", "지름 (mm)", "반경 (mm)"]]
-        for i, d in enumerate(diam, 1):
-            rows.append([i, fnum(d, 3), fnum(float(d) / 2.0, 3)])
-        add_table(s, rows, Inches(0.6), Inches(1.4), Inches(6.0), [0.16, 0.42, 0.42])
-        place_image(s, "iso", Inches(7.0), Inches(1.55), Inches(5.8), Inches(5.2),
+        ncols = max(1, min(MAX_COLS, (len(shown) + PER_COL - 1) // PER_COL))
+        col_w = Inches(3.0)
+        gap = Inches(0.18)
+        for ci in range(ncols):
+            chunk = shown[ci * PER_COL:(ci + 1) * PER_COL]
+            rows = [["#", "지름(mm)", "반경(mm)"]]
+            for k, d in enumerate(chunk):
+                rows.append([ci * PER_COL + k + 1, fnum(d, 3), fnum(float(d) / 2.0, 3)])
+            add_table(s, rows, Inches(0.5) + ci * (col_w + gap), Inches(1.4), col_w,
+                      [0.22, 0.42, 0.36], fontsize=11)
+        place_image(s, "iso", Inches(7.05), Inches(1.55), Inches(5.8), Inches(5.2),
                     caption="원통면 위치 (등각 투상도)")
     else:
         textbox(s, Inches(0.7), Inches(1.6), Inches(11), Inches(1),
