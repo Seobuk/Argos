@@ -64,9 +64,21 @@ argos-cli measure part.step --vertex 1 --vertex 7
 # cross-section by the XY plane at z = 5
 argos-cli section part.step --plane xy --offset 5
 
+# mass / centre-of-mass / inertia tensor (robot-link dynamics; density kg/m^3)
+argos-cli props part.step --density 2700
+
+# emit a ROS/URDF <inertial> block (paste straight into a robot link)
+argos-cli props part.step --urdf
+
 # model summary
 argos-cli info part.step
 ```
+
+> 🤖 **Mass & inertia for humanoids**: `props` computes volume, centre of mass,
+> the **inertia tensor about the COM** and principal moments in SI units
+> (kg, kg·m²) and exports a URDF `<inertial>` block. An auto **PowerPoint
+> measurement report** from a STEP file is in progress on the
+> `feature/step-report` branch (with an example).
 
 ## 🔨 Build (Windows)
 

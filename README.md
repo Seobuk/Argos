@@ -64,9 +64,20 @@ argos-cli measure part.step --vertex 1 --vertex 7
 # XY 평면, z = 5 단면
 argos-cli section part.step --plane xy --offset 5
 
+# 질량·무게중심·관성텐서 (휴머노이드 링크 동역학용; 밀도 kg/m³)
+argos-cli props part.step --density 2700
+
+# URDF <inertial> 블록으로 출력 (로봇 링크에 바로 붙여넣기)
+argos-cli props part.step --urdf
+
 # 모델 요약
 argos-cli info part.step
 ```
+
+> 🤖 **휴머노이드용 질량·관성**: `props`는 부피·무게중심·**관성텐서(COM 기준)**·
+> 주관성모멘트를 SI 단위(kg, kg·m²)로 계산해 URDF `<inertial>`로 내보냅니다.
+> STEP을 받아 자동으로 측정 **보고서(PowerPoint)**를 만드는 기능은
+> `feature/step-report` 브랜치에서 개발 중입니다(예시 포함).
 
 ## 🔨 빌드 (Windows)
 
