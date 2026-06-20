@@ -85,6 +85,20 @@ Outputs in `build/Release/`: `mayo.exe` (shipped as `Argos.exe`), `argos-cli.exe
 - [Product spec](docs/argos-spec.md)
 - [UI design handoff](docs/ui-design/)
 
+## 🙏 Open-source acknowledgements
+
+Argos is built on the open source below. See **[THIRD-PARTY-NOTICES](docs/THIRD-PARTY-NOTICES.md)** for the full list with versions, copyright and links.
+
+| Component | License |
+|---|---|
+| [Mayo](https://github.com/fougue/mayo) — fork base | BSD-2-Clause |
+| [Qt](https://www.qt.io) 6.8.3 | LGPL-3.0 |
+| [Open CASCADE](https://dev.opencascade.org) 7.9.0 | LGPL-2.1 + exception |
+| [nlohmann/json](https://github.com/nlohmann/json) 3.11.3 | MIT |
+| [fmt](https://github.com/fmtlib/fmt) · [Microsoft GSL](https://github.com/microsoft/GSL) · [magic_enum](https://github.com/Neargye/magic_enum) · [KDBindings](https://github.com/KDAB/KDBindings) · [miniply](https://github.com/vilya/miniply) | MIT |
+| [fast_float](https://github.com/fastfloat/fast_float) | Apache-2.0 / MIT / BSL-1.0 |
+| [Noto Sans KR](https://fonts.google.com/noto/specimen/Noto+Sans+KR) · [Pretendard](https://github.com/orioncactus/pretendard) | SIL OFL 1.1 |
+
 ## 📄 License
 
 Argos keeps Mayo's permissive **BSD-2-Clause** license ([LICENSE.txt](LICENSE.txt)).

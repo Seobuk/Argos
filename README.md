@@ -85,7 +85,21 @@ powershell -File scripts/argos-package.ps1   # dist/Argos-win64.zip 생성
 - [제품 스펙](docs/argos-spec.md)
 - [UI 디자인 핸드오프](docs/ui-design/)
 
+## 🙏 오픈소스 고지
+
+Argos는 아래 오픈소스로 만들어졌습니다. 전체 목록·버전·저작권·링크는 **[오픈소스 고지(THIRD-PARTY-NOTICES)](docs/THIRD-PARTY-NOTICES.md)** 를 참고하세요.
+
+| 구성요소 | 라이선스 |
+|---|---|
+| [Mayo](https://github.com/fougue/mayo) — 포크 원본 | BSD-2-Clause |
+| [Qt](https://www.qt.io) 6.8.3 | LGPL-3.0 |
+| [Open CASCADE](https://dev.opencascade.org) 7.9.0 | LGPL-2.1 + 예외 |
+| [nlohmann/json](https://github.com/nlohmann/json) 3.11.3 | MIT |
+| [fmt](https://github.com/fmtlib/fmt) · [Microsoft GSL](https://github.com/microsoft/GSL) · [magic_enum](https://github.com/Neargye/magic_enum) · [KDBindings](https://github.com/KDAB/KDBindings) · [miniply](https://github.com/vilya/miniply) | MIT |
+| [fast_float](https://github.com/fastfloat/fast_float) | Apache-2.0 / MIT / BSL-1.0 |
+| [Noto Sans KR](https://fonts.google.com/noto/specimen/Noto+Sans+KR) · [Pretendard](https://github.com/orioncactus/pretendard) | SIL OFL 1.1 |
+
 ## 📄 라이선스
 
-Mayo의 **BSD-2-Clause** 라이선스를 그대로 따릅니다([LICENSE.txt](LICENSE.txt)).
+Argos 자체는 Mayo의 **BSD-2-Clause** 라이선스를 그대로 따릅니다([LICENSE.txt](LICENSE.txt)).
 Argos는 [fougue/mayo](https://github.com/fougue/mayo)의 포크입니다.
