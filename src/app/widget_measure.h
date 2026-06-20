@@ -33,6 +33,10 @@ public:
 
     static void addTool(std::unique_ptr<IMeasureTool> tool);
 
+    // Argos: one-line measure of a single hovered sub-shape (vertex/edge/face),
+    // for the live hover readout. Returns empty for non-measurable owners.
+    static QString quickMeasureText(const GraphicsOwnerPtr& owner);
+
 signals:
     void sizeAdjustmentRequested();
 

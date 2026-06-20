@@ -25,6 +25,7 @@
 #include "theme.h"
 #include "widget_file_system.h"
 #include "widget_gui_document.h"
+#include "widget_measure.h"
 #include "widget_model_tree.h"
 #include "widget_occ_view.h"
 #include "widget_properties_editor.h"
@@ -561,6 +562,9 @@ void WidgetMainControl::onGuiDocumentAdded(GuiDocument* guiDoc)
         m_ui->label_ValuePosX->setText(QString::number(pos3d.X(), 'f', 3));
         m_ui->label_ValuePosY->setText(QString::number(pos3d.Y(), 'f', 3));
         m_ui->label_ValuePosZ->setText(QString::number(pos3d.Z(), 'f', 3));
+        // Argos: live hover measure of the sub-shape under the cursor (zero-click).
+        m_ui->label_HoverMeasure->setText(
+            WidgetMeasure::quickMeasureText(gfxScene->currentHighlightedOwner()));
     });
 
     m_ui->stack_GuiDocuments->addWidget(widget);

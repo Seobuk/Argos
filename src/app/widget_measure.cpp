@@ -488,6 +488,25 @@ void WidgetMeasure::addTool(std::unique_ptr<IMeasureTool> tool)
         getMeasureTools().push_back(std::move(tool));
 }
 
+QString WidgetMeasure::quickMeasureText(const GraphicsOwnerPtr& owner)
+{
+    if (!owner)
+        return {};
+
+    const TopoDS_Shape s = ownerToShape(owner);
+    if (s.IsNull())
+        return {};
+
+    // Only measurable sub-shapes — this also gates the readout to measure mode,
+    // since vertex/edge/face owners are only highlighted while measuring.
+    const TopAbs_ShapeEnum t = s.ShapeType();
+    if (t != TopAbs_VERTEX && t != TopAbs_EDGE && t != TopAbs_FACE)
+        return {};
+
+    const argos::MeasureResult r = argos::dispatch({ s });
+    return r.ok ? formatArgosShort(r) : QString();
+}
+
 MeasureType WidgetMeasure::toMeasureType(int comboBoxId)
 {
     switch (comboBoxId) {
