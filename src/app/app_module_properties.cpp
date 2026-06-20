@@ -61,6 +61,8 @@ AppModuleProperties::AppModuleProperties(Settings* settings)
     // Application
     this->actionOnDocumentFileChange.mutableEnumeration().changeTrContext(AppModuleProperties::textIdContext());
     settings->addSetting(&this->language, groupId_application);
+    // Argos: default UI language is Korean (persisted so it survives restarts).
+    this->language.setValue(AppModule::languages().findValueByName("ko"));
     settings->addSetting(&this->recentFiles, groupId_application);
     settings->addSetting(&this->lastOpenDir, groupId_application);
     settings->addSetting(&this->lastSelectedFormatFilter, groupId_application);
@@ -105,7 +107,7 @@ AppModuleProperties::AppModuleProperties(Settings* settings)
         this->unitSystemSchema.setValue(UnitSystem::SI);
     });
     settings->addResetFunction(groupId_application, [this]{
-        this->language.setValue(AppModule::languages().findValueByName("en"));
+        this->language.setValue(AppModule::languages().findValueByName("ko"));
         this->recentFiles.setValue({});
         this->lastOpenDir.setValue({});
         this->lastSelectedFormatFilter.setValue({});

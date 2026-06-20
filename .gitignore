@@ -11,3 +11,6 @@ cmake/CustomSteps.cmake
 /resources/fonts/
 vcpkg_installed/
 *.zip
+
+# User-provided sample model (do not commit)
+Example.step
