@@ -48,6 +48,7 @@
 #include <QtCore/QFileInfo>
 #include <QtGui/QFont>
 #include <QtGui/QFontDatabase>
+#include <QtGui/QIcon>
 #include <QtGui/QOffscreenSurface>
 #include <QtGui/QOpenGLContext>
 #include <QtGui/QOpenGLFunctions>
@@ -92,7 +93,7 @@ static CommandLineArguments processCommandLine()
     // Configure command-line parser
     QCommandLineParser cmdParser;
     cmdParser.setApplicationDescription(
-        Main::tr("Mayo the opensource 3D CAD viewer and converter")
+        Main::tr("Argos — Windows-native 3D CAD measure & section viewer (Mayo fork)")
     );
     cmdParser.addHelpOption();
     cmdParser.addVersionOption();
@@ -455,9 +456,19 @@ int main(int argc, char* argv[])
 
     QCoreApplication::setOrganizationName("Fougue");
     QCoreApplication::setOrganizationDomain("www.fougue.pro");
-    QCoreApplication::setApplicationName("Mayo");
+    QCoreApplication::setApplicationName("Argos");
     QCoreApplication::setApplicationVersion(QString::fromUtf8(Mayo::strVersion));
     QApplication app(argc, argv);
+    QGuiApplication::setApplicationDisplayName("Argos");
+
+    // Argos: all-seeing-eye application icon (window titlebar, taskbar, dialogs).
+    {
+        QIcon appIcon;
+        for (int sz : { 16, 24, 32, 64, 128, 256 })
+            appIcon.addFile(QString(":/images/appicon_%1.png").arg(sz));
+        if (!appIcon.isNull())
+            QApplication::setWindowIcon(appIcon);
+    }
 
     // Argos: load any bundled fonts (e.g. NotoSansKR) from a "fonts" folder next
     // to the executable so Korean UI labels render correctly even on systems with

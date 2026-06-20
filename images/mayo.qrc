@@ -1,6 +1,7 @@
 <RCC>
     <qresource prefix="/images">
         <file>appicon_128.png</file>
+        <file>appicon_256.png</file>
         <file>appicon_16.png</file>
         <file>appicon_24.png</file>
         <file>appicon_32.png</file>

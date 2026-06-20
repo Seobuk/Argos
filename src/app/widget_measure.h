@@ -9,6 +9,7 @@
 #include "../base/libtree.h"
 #include "../measure/measure_display.h"
 #include "../measure/measure_tool.h"
+#include "../argos_core/measure.h"
 
 #include <QtWidgets/QWidget>
 #include <memory>
@@ -83,6 +84,8 @@ private:
     QString m_resultText;   // Argos: formatted readout of the current selection set
     QString m_lastShort;    // Argos: one-line summary of the last result (for "값 복사")
     QString m_lastJson;     // Argos: JSON of the last result (for "JSON 복사")
+    argos::MeasureResult m_lastResult;  // Argos: structured result driving the card panel
+    bool m_hasResult = false;           // Argos: true when m_lastResult is valid
 
     // Argos SolidWorks-style controls (created in code, see constructor)
     QCheckBox* m_checkShowXyz = nullptr;

@@ -27,10 +27,13 @@
 #include <QtCore/QtDebug>
 #include <QtGui/QAction>
 #include <QtGui/QClipboard>
+#include <QtGui/QColor>
 #include <QtGui/QFontDatabase>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QShortcut>
 #include <QtWidgets/QCheckBox>
+#include <QtWidgets/QFormLayout>
+#include <QtWidgets/QFrame>
 #include <QtWidgets/QGridLayout>
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
@@ -38,6 +41,9 @@
 #include <QtWidgets/QMenu>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QVBoxLayout>
+
+#include <utility>
+#include <vector>
 
 #include <cmath>
 
@@ -187,6 +193,53 @@ QString formatArgosShort(const argos::MeasureResult& r)
     default:
         return QString();
     }
+}
+
+// Argos: caption + headline value for the primary result card.
+struct PrimaryReadout { QString caption; QString value; };
+
+PrimaryReadout primaryReadout(const argos::MeasureResult& r)
+{
+    using K = argos::MeasureKind;
+    switch (r.kind) {
+    case K::VertexPosition: return { QStringLiteral("좌표"), r.point ? xyz(*r.point) : QStringLiteral("-") };
+    case K::Length:         return { QStringLiteral("길이"), num(r.value.value_or(0)) + " mm" };
+    case K::Circle:         return { QStringLiteral("지름"), num(r.diameter.value_or(0)) + " mm" };
+    case K::Area:           return { QStringLiteral("면적"), num(r.value.value_or(0)) + " mm²" };
+    case K::MinDistance:    return { QStringLiteral("거리"), num(r.value.value_or(0)) + " mm" };
+    case K::CenterDistance: return { QStringLiteral("중심간 거리"), num(r.value.value_or(0)) + " mm" };
+    case K::Angle:          return { QStringLiteral("각도"), num(r.value.value_or(0)) + "°" };
+    case K::BoundingBox:    return { QStringLiteral("경계 상자"),
+                                     r.bboxSize ? QString("%1 × %2 × %3 mm")
+                                                      .arg(num(r.bboxSize->x), num(r.bboxSize->y), num(r.bboxSize->z))
+                                                : QStringLiteral("-") };
+    case K::SumLength:      return { QString("총 길이 (%1개)").arg(r.inputCount), num(r.value.value_or(0)) + " mm" };
+    case K::SumArea:        return { QString("총 면적 (%1개)").arg(r.inputCount), num(r.value.value_or(0)) + " mm²" };
+    default:                return { QString(), QString() };
+    }
+}
+
+// Argos: extra label/value rows shown beneath the primary card, per kind.
+std::vector<std::pair<QString, QString>> secondaryRows(const argos::MeasureResult& r)
+{
+    using K = argos::MeasureKind;
+    std::vector<std::pair<QString, QString>> rows;
+    switch (r.kind) {
+    case K::Circle:
+        if (r.radius) rows.emplace_back(QStringLiteral("반경"), num(*r.radius) + " mm");
+        if (r.point)  rows.emplace_back(QStringLiteral("중심"), xyz(*r.point));
+        if (r.area)   rows.emplace_back(QStringLiteral("면적"), num(*r.area) + " mm²");
+        break;
+    case K::Area:
+        if (r.length) rows.emplace_back(QStringLiteral("둘레"), num(*r.length) + " mm");
+        break;
+    case K::BoundingBox:
+        if (r.value)  rows.emplace_back(QStringLiteral("부피"), num(*r.value) + " mm³");
+        break;
+    default:
+        break;
+    }
+    return rows;
 }
 
 // Get global array of available measurement tool objects
@@ -598,6 +651,7 @@ void WidgetMeasure::recompute(bool addToHistory)
     m_resultText.clear();
     m_lastShort.clear();
     m_lastJson.clear();
+    m_hasResult = false;
 
     const std::vector<GraphicsOwnerPtr>& owners = m_vecSelectedOwner;
     if (owners.empty()) {
@@ -624,6 +678,8 @@ void WidgetMeasure::recompute(bool addToHistory)
         m_errorMessage = QString::fromStdString(res.error);
     }
     else {
+        m_lastResult = res;
+        m_hasResult = true;
         m_resultText = formatArgosResult(res);
         m_lastShort = formatArgosShort(res);
         m_lastJson = QString::fromStdString(argos::to_json(res));
@@ -701,38 +757,146 @@ void WidgetMeasure::updateMessagePanel()
         delete item;
     }
 
-    // Error message takes precedence, then the argos result, then a hint.
-    if (!m_errorMessage.isEmpty() || m_resultText.isEmpty()) {
-        auto labelMessage = new QLabel(m_ui->widget_Message);
-        labelMessage->setContentsMargins(m_ui->layout_Main->contentsMargins());
-        m_ui->layout_Message->addWidget(labelMessage);
-        const auto msgTextColorRole =
-                m_errorMessage.isEmpty() ?
-                    Theme::Color::MessageIndicator_InfoText :
-                    Theme::Color::MessageIndicator_ErrorText;
-        const auto msgBackgroundColorRole =
-                m_errorMessage.isEmpty() ?
-                    Theme::Color::MessageIndicator_InfoBackground :
-                    Theme::Color::MessageIndicator_ErrorBackground;
-        labelMessage->setStyleSheet(
-                    QString("QLabel { color: %1; background-color: %2 }")
-                    .arg(mayoTheme()->color(msgTextColorRole).name(),
-                         mayoTheme()->color(msgBackgroundColorRole).name())
-        );
-        const QString msg = m_errorMessage.isEmpty()
-                ? tr("측정할 형상을 선택하세요 (점 · 모서리 · 면)")
-                : m_errorMessage;
-        labelMessage->setText(msg);
+    QWidget* host = m_ui->widget_Message;
+    QVBoxLayout* root = m_ui->layout_Message;
+    root->setSpacing(8);
+
+    // Per-entity colors (selection chips). Index 0 = green, 1 = blue, ...
+    static const QColor kEntityColors[] = {
+        QColor(0x2f, 0x9e, 0x6f), QColor(0x1f, 0x6f, 0xc2), QColor(0xc0, 0x7d, 0x12),
+        QColor(0x8e, 0x44, 0xad), QColor(0xc2, 0x45, 0x3a)
+    };
+    const QString cardQss = "QFrame#argosCard { border:1px solid palette(mid); border-radius:6px; }";
+    const QString dimQss = "color: rgba(140,140,140,230);";
+
+    // 1) 선택 항목 — color-coded chips of the current selection set
+    if (!m_vecSelectedOwner.empty()) {
+        auto cap = new QLabel(tr("선택 항목"), host);
+        cap->setStyleSheet(dimQss + " font-weight:600;");
+        root->addWidget(cap);
+
+        auto chips = new QWidget(host);
+        auto chipsLayout = new QHBoxLayout(chips);
+        chipsLayout->setContentsMargins(0, 0, 0, 0);
+        chipsLayout->setSpacing(6);
+        int nV = 0, nE = 0, nF = 0, idx = 0;
+        for (const GraphicsOwnerPtr& owner : m_vecSelectedOwner) {
+            const TopoDS_Shape s = ownerToShape(owner);
+            QString name;
+            if (!s.IsNull() && s.ShapeType() == TopAbs_VERTEX)    name = tr("꼭짓점 %1").arg(++nV);
+            else if (!s.IsNull() && s.ShapeType() == TopAbs_EDGE) name = tr("모서리 %1").arg(++nE);
+            else if (!s.IsNull() && s.ShapeType() == TopAbs_FACE) name = tr("면 %1").arg(++nF);
+            else                                                  name = tr("형상 %1").arg(idx + 1);
+
+            const QColor col = kEntityColors[idx % 5];
+            auto chip = new QFrame(chips);
+            chip->setObjectName("argosCard");
+            chip->setStyleSheet(cardQss);
+            auto cl = new QHBoxLayout(chip);
+            cl->setContentsMargins(7, 3, 8, 3);
+            cl->setSpacing(5);
+            auto sw = new QLabel(chip);
+            sw->setFixedSize(9, 9);
+            sw->setStyleSheet(QString("background:%1; border-radius:2px;").arg(col.name()));
+            auto tx = new QLabel(name, chip);
+            tx->setTextFormat(Qt::PlainText);
+            cl->addWidget(sw);
+            cl->addWidget(tx);
+            chipsLayout->addWidget(chip);
+            ++idx;
+        }
+        chipsLayout->addStretch(1);
+        root->addWidget(chips);
     }
-    else {
-        // SolidWorks-style single readout for the whole selection set, computed
-        // by argos_core.
-        const QFont fontResult = QFontDatabase::systemFont(QFontDatabase::FixedFont);
-        auto label = new QLabel(m_resultText, m_ui->widget_Message);
-        label->setFont(fontResult);
-        label->setTextInteractionFlags(Qt::TextSelectableByMouse);
-        label->setWordWrap(true);
-        m_ui->layout_Message->addWidget(label);
+
+    // 2) Error / empty -> styled hint (no result cards)
+    if (!m_errorMessage.isEmpty() || !m_hasResult) {
+        auto labelMessage = new QLabel(host);
+        labelMessage->setWordWrap(true);
+        labelMessage->setContentsMargins(m_ui->layout_Main->contentsMargins());
+        const auto txtRole = m_errorMessage.isEmpty() ? Theme::Color::MessageIndicator_InfoText
+                                                      : Theme::Color::MessageIndicator_ErrorText;
+        const auto bgRole = m_errorMessage.isEmpty() ? Theme::Color::MessageIndicator_InfoBackground
+                                                     : Theme::Color::MessageIndicator_ErrorBackground;
+        labelMessage->setStyleSheet(QString("QLabel { color: %1; background-color: %2 }")
+                                    .arg(mayoTheme()->color(txtRole).name(),
+                                         mayoTheme()->color(bgRole).name()));
+        labelMessage->setText(m_errorMessage.isEmpty()
+                              ? tr("측정할 형상을 선택하세요 (점 · 모서리 · 면)")
+                              : m_errorMessage);
+        root->addWidget(labelMessage);
+        emit this->sizeAdjustmentRequested();
+        return;
+    }
+
+    // 3) Primary value card (big accent number)
+    const PrimaryReadout pr = primaryReadout(m_lastResult);
+    {
+        auto card = new QFrame(host);
+        card->setObjectName("argosCard");
+        card->setStyleSheet(cardQss);
+        auto v = new QVBoxLayout(card);
+        v->setContentsMargins(12, 9, 12, 9);
+        v->setSpacing(2);
+        auto cap = new QLabel(pr.caption.isEmpty() ? tr("측정") : pr.caption, card);
+        cap->setStyleSheet(dimQss + " font-size:11px;");
+        auto val = new QLabel(pr.value, card);
+        val->setStyleSheet("font-size:22px; font-weight:700; color: palette(highlight);");
+        val->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        val->setWordWrap(true);
+        v->addWidget(cap);
+        v->addWidget(val);
+        root->addWidget(card);
+    }
+
+    // 4) Color-coded ΔX / ΔY / ΔZ grid (when present and enabled)
+    const bool showXyz = !m_checkShowXyz || m_checkShowXyz->isChecked();
+    if (m_lastResult.delta && showXyz) {
+        const argos::Vec3 d = *m_lastResult.delta;
+        const char* axisName[3] = { "ΔX", "ΔY", "ΔZ" };
+        const QString axisColor[3] = { "#d6453b", "#2f9e6f", "#2f7fd4" };
+        const double axisVal[3] = { d.x, d.y, d.z };
+        auto grid = new QWidget(host);
+        auto gl = new QGridLayout(grid);
+        gl->setContentsMargins(0, 0, 0, 0);
+        gl->setSpacing(6);
+        for (int i = 0; i < 3; ++i) {
+            auto cell = new QFrame(grid);
+            cell->setObjectName("argosCard");
+            cell->setStyleSheet(cardQss);
+            auto cv = new QVBoxLayout(cell);
+            cv->setContentsMargins(8, 6, 8, 6);
+            cv->setSpacing(1);
+            auto a = new QLabel(QString::fromUtf8(axisName[i]), cell);
+            a->setStyleSheet(QString("color:%1; font-weight:700; font-size:11px;").arg(axisColor[i]));
+            auto vv = new QLabel(num(axisVal[i]), cell);
+            vv->setStyleSheet("font-size:14px; font-weight:600;");
+            vv->setTextInteractionFlags(Qt::TextSelectableByMouse);
+            cv->addWidget(a);
+            cv->addWidget(vv);
+            gl->addWidget(cell, 0, i);
+        }
+        root->addWidget(grid);
+    }
+
+    // 5) Secondary rows (반경/중심/면적/둘레/부피 ...)
+    const auto rows = secondaryRows(m_lastResult);
+    if (!rows.empty()) {
+        auto card = new QFrame(host);
+        card->setObjectName("argosCard");
+        card->setStyleSheet(cardQss);
+        auto form = new QFormLayout(card);
+        form->setContentsMargins(12, 8, 12, 8);
+        form->setSpacing(6);
+        for (const auto& kv : rows) {
+            auto k = new QLabel(kv.first, card);
+            k->setStyleSheet(dimQss);
+            auto v = new QLabel(kv.second, card);
+            v->setStyleSheet("font-weight:600;");
+            v->setTextInteractionFlags(Qt::TextSelectableByMouse);
+            form->addRow(k, v);
+        }
+        root->addWidget(card);
     }
 
     emit this->sizeAdjustmentRequested();
