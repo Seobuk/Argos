@@ -45,6 +45,9 @@
 #include <QtCore/QTimer>
 #include <QtCore/QTranslator>
 #include <QtCore/QVersionNumber>
+#include <QtCore/QFileInfo>
+#include <QtGui/QFont>
+#include <QtGui/QFontDatabase>
 #include <QtGui/QOffscreenSurface>
 #include <QtGui/QOpenGLContext>
 #include <QtGui/QOpenGLFunctions>
@@ -455,6 +458,35 @@ int main(int argc, char* argv[])
     QCoreApplication::setApplicationName("Mayo");
     QCoreApplication::setApplicationVersion(QString::fromUtf8(Mayo::strVersion));
     QApplication app(argc, argv);
+
+    // Argos: load any bundled fonts (e.g. NotoSansKR) from a "fonts" folder next
+    // to the executable so Korean UI labels render correctly even on systems with
+    // no Korean system font. Safe no-op when the folder/fonts are absent.
+    {
+        const QDir fontsDir(QCoreApplication::applicationDirPath() + "/fonts");
+        QString koreanFamily;
+        const auto fontFiles = fontsDir.entryInfoList(QStringList{ "*.ttf", "*.otf" }, QDir::Files);
+        for (const QFileInfo& fi : fontFiles) {
+            const int id = QFontDatabase::addApplicationFont(fi.absoluteFilePath());
+            if (id < 0)
+                continue;
+
+            for (const QString& fam : QFontDatabase::applicationFontFamilies(id)) {
+                if (fam.contains("Noto", Qt::CaseInsensitive)
+                    || fam.contains("Malgun", Qt::CaseInsensitive)
+                    || fam.contains("Gothic", Qt::CaseInsensitive))
+                {
+                    koreanFamily = fam;
+                }
+            }
+        }
+
+        if (!koreanFamily.isEmpty()) {
+            QFont f = app.font();
+            f.setFamily(koreanFamily);
+            app.setFont(f);
+        }
+    }
 
     // Run Mayo application GUI
     return Mayo::runApp(&app);

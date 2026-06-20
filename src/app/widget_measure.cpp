@@ -9,18 +9,177 @@
 #include "ui_widget_measure.h"
 
 #include "../base/cpp_utils.h"
+#include "../base/occ_handle.h"
 #include "../gui/gui_document.h"
 #include "../measure/measure_tool_brep.h"
 #include "../qtcommon/qstring_conv.h"
+#include "../argos_core/measure.h"
 
+#include <AIS_Shape.hxx>
+#include <Standard_Failure.hxx>
+#include <Standard_Version.hxx>
+#include <StdSelect_BRepOwner.hxx>
+#include <TopLoc_Location.hxx>
+#include <TopoDS_Shape.hxx>
+#include <gp_Trsf.hxx>
+
+#include <QtCore/QString>
 #include <QtCore/QtDebug>
 #include <QtGui/QFontDatabase>
+#include <QtWidgets/QCheckBox>
+#include <QtWidgets/QGridLayout>
+#include <QtWidgets/QHBoxLayout>
+#include <QtWidgets/QLabel>
+#include <QtWidgets/QListWidget>
+
+#include <cmath>
 
 namespace Mayo {
 
 namespace {
 
 using IMeasureToolPtr = std::unique_ptr<IMeasureTool>;
+
+// Convert a selected graphics owner into the underlying (located) TopoDS_Shape.
+// Mirrors the private getShape() helper of MeasureToolBRep so argos_core can be
+// fed raw shapes.
+TopoDS_Shape ownerToShape(const GraphicsOwnerPtr& owner)
+{
+    auto brepOwner = OccHandle<StdSelect_BRepOwner>::DownCast(owner);
+    if (!brepOwner)
+        return {};
+
+    TopLoc_Location loc = owner->Location();
+#if OCC_VERSION_HEX >= 0x070600
+    const double absScale = std::abs(loc.Transformation().ScaleFactor());
+    const double scalePrec = TopLoc_Location::ScalePrec();
+    if (absScale < (1. - scalePrec) || absScale > (1. + scalePrec)) {
+        gp_Trsf trsf = loc.Transformation();
+        trsf.SetScaleFactor(1.);
+        loc = trsf;
+    }
+#endif
+    return brepOwner->Shape().Moved(loc);
+}
+
+// Map the argos auto-dispatched kind onto a Mayo MeasureType, so the existing
+// on-screen callout machinery (BaseMeasureDisplay) can be reused.
+MeasureType mayoTypeFromKind(argos::MeasureKind k)
+{
+    switch (k) {
+    case argos::MeasureKind::VertexPosition: return MeasureType::VertexPosition;
+    case argos::MeasureKind::Length:         return MeasureType::Length;
+    case argos::MeasureKind::Circle:         return MeasureType::CircleDiameter;
+    case argos::MeasureKind::Area:           return MeasureType::Area;
+    case argos::MeasureKind::MinDistance:    return MeasureType::MinDistance;
+    case argos::MeasureKind::CenterDistance: return MeasureType::CenterDistance;
+    case argos::MeasureKind::Angle:          return MeasureType::Angle;
+    case argos::MeasureKind::BoundingBox:    return MeasureType::BoundingBox;
+    default:                                 return MeasureType::None;
+    }
+}
+
+// Decimal count for the panel/history, honoring the user's unit setting so the
+// text readout matches the on-screen callout (which uses the same setting).
+int uiDecimals()
+{
+    const AppModule* m = AppModule::get();
+    const int d = m ? m->defaultTextOptions().unitDecimals : 3;
+    return (d >= 0 && d <= 12) ? d : 3;
+}
+
+QString num(double v) { return QString::number(v, 'f', uiDecimals()); }
+QString xyz(const argos::Vec3& p) { return QString("(%1, %2, %3)").arg(num(p.x), num(p.y), num(p.z)); }
+
+// Human-readable, Korean-labelled readout of an argos measurement result.
+QString formatArgosResult(const argos::MeasureResult& r)
+{
+    QString s;
+    switch (r.kind) {
+    case argos::MeasureKind::VertexPosition:
+        if (r.point)
+            s = QString("점 좌표\n  X: %1\n  Y: %2\n  Z: %3")
+                    .arg(num(r.point->x), num(r.point->y), num(r.point->z));
+        break;
+    case argos::MeasureKind::Length:
+        s = QString("길이: %1 mm").arg(num(r.value.value_or(0)));
+        break;
+    case argos::MeasureKind::Circle:
+        s = QString("지름: %1 mm").arg(num(r.diameter.value_or(0)));
+        if (r.radius)  s += QString("\n  반경: %1 mm").arg(num(*r.radius));
+        if (r.point)   s += QString("\n  중심: %1").arg(xyz(*r.point));
+        if (r.area)    s += QString("\n  면적: %1 mm²").arg(num(*r.area));
+        break;
+    case argos::MeasureKind::Area:
+        s = QString("면적: %1 mm²").arg(num(r.value.value_or(0)));
+        if (r.length) s += QString("\n  둘레: %1 mm").arg(num(*r.length));
+        break;
+    case argos::MeasureKind::MinDistance:
+        s = QString("거리: %1 mm").arg(num(r.value.value_or(0)));
+        if (r.delta)
+            s += QString("\n  dX: %1  dY: %2  dZ: %3")
+                    .arg(num(r.delta->x), num(r.delta->y), num(r.delta->z));
+        break;
+    case argos::MeasureKind::CenterDistance:
+        s = QString("중심간 거리: %1 mm").arg(num(r.value.value_or(0)));
+        if (r.delta)
+            s += QString("\n  dX: %1  dY: %2  dZ: %3")
+                    .arg(num(r.delta->x), num(r.delta->y), num(r.delta->z));
+        break;
+    case argos::MeasureKind::Angle:
+        s = QString("각도: %1°").arg(num(r.value.value_or(0)));
+        break;
+    case argos::MeasureKind::BoundingBox:
+        if (r.bboxSize)
+            s = QString("경계 상자: %1 × %2 × %3 mm")
+                    .arg(num(r.bboxSize->x), num(r.bboxSize->y), num(r.bboxSize->z));
+        if (r.value) s += QString("\n  부피: %1 mm³").arg(num(*r.value));
+        break;
+    case argos::MeasureKind::SumLength:
+        s = QString("총 길이 (%1개): %2 mm").arg(r.inputCount).arg(num(r.value.value_or(0)));
+        break;
+    case argos::MeasureKind::SumArea:
+        s = QString("총 면적 (%1개): %2 mm²").arg(r.inputCount).arg(num(r.value.value_or(0)));
+        break;
+    default:
+        break;
+    }
+
+    // Append compact JSON (the same payload the CLI/MCP path would emit)
+    s += QString("\n\nJSON: %1").arg(QString::fromStdString(argos::to_json(r)));
+    return s;
+}
+
+// One-line summary for the measurement-history list.
+QString formatArgosShort(const argos::MeasureResult& r)
+{
+    switch (r.kind) {
+    case argos::MeasureKind::VertexPosition:
+        return r.point ? QString("좌표 %1").arg(xyz(*r.point)) : QString("좌표");
+    case argos::MeasureKind::Length:
+        return QString("길이 %1 mm").arg(num(r.value.value_or(0)));
+    case argos::MeasureKind::Circle:
+        return QString("지름 %1 mm").arg(num(r.diameter.value_or(0)));
+    case argos::MeasureKind::Area:
+        return QString("면적 %1 mm²").arg(num(r.value.value_or(0)));
+    case argos::MeasureKind::MinDistance:
+        return QString("거리 %1 mm").arg(num(r.value.value_or(0)));
+    case argos::MeasureKind::CenterDistance:
+        return QString("중심거리 %1 mm").arg(num(r.value.value_or(0)));
+    case argos::MeasureKind::Angle:
+        return QString("각도 %1°").arg(num(r.value.value_or(0)));
+    case argos::MeasureKind::BoundingBox:
+        return r.bboxSize ? QString("경계상자 %1×%2×%3")
+                                .arg(num(r.bboxSize->x), num(r.bboxSize->y), num(r.bboxSize->z))
+                          : QString("경계상자");
+    case argos::MeasureKind::SumLength:
+        return QString("총 길이 %1 mm").arg(num(r.value.value_or(0)));
+    case argos::MeasureKind::SumArea:
+        return QString("총 면적 %1 mm²").arg(num(r.value.value_or(0)));
+    default:
+        return QString();
+    }
+}
 
 // Get global array of available measurement tool objects
 std::vector<IMeasureToolPtr>& getMeasureTools()
@@ -92,6 +251,44 @@ WidgetMeasure::WidgetMeasure(GuiDocument* guiDoc, QWidget* parent)
     );
 
     this->onMeasureTypeChanged(m_ui->combo_MeasureType->currentIndex());
+
+    // Argos: SolidWorks-style auto-dispatch -> the measure-type selector is no
+    // longer needed (type is inferred from the selection set). Unit selectors are
+    // deferred to P1; the panel readout currently uses canonical units (mm, mm^2,
+    // deg, mm^3), so hide them to avoid advertising controls that do nothing yet.
+    // (Done AFTER onMeasureTypeChanged, which toggles unit-widget visibility.)
+    for (QWidget* w : {
+            static_cast<QWidget*>(m_ui->label_MeasureType), static_cast<QWidget*>(m_ui->combo_MeasureType),
+            static_cast<QWidget*>(m_ui->label_LengthUnit),  static_cast<QWidget*>(m_ui->combo_LengthUnit),
+            static_cast<QWidget*>(m_ui->label_AngleUnit),   static_cast<QWidget*>(m_ui->combo_AngleUnit),
+            static_cast<QWidget*>(m_ui->label_AreaUnit),    static_cast<QWidget*>(m_ui->combo_AreaUnit),
+            static_cast<QWidget*>(m_ui->label_VolumeUnit),  static_cast<QWidget*>(m_ui->combo_VolumeUnit) }) {
+        w->setVisible(false);
+    }
+
+    // Argos: SolidWorks-style options (Show XYZ, Point-to-Point) + measurement
+    // history, built in code and inserted into the panel grid (rows 5, 7-8).
+    m_checkShowXyz = new QCheckBox(tr("dX/dY/dZ 표시"), this);
+    m_checkShowXyz->setChecked(true);
+    m_checkPointToPoint = new QCheckBox(tr("점-점 거리"), this);
+
+    auto optionRow = new QWidget(this);
+    auto optionLayout = new QHBoxLayout(optionRow);
+    optionLayout->setContentsMargins(0, 0, 0, 0);
+    optionLayout->addWidget(m_checkShowXyz);
+    optionLayout->addWidget(m_checkPointToPoint);
+    optionLayout->addStretch(1);
+    m_ui->layout_Main->addWidget(optionRow, 5, 0, 1, 2);
+
+    auto historyLabel = new QLabel(tr("측정 이력"), this);
+    m_historyList = new QListWidget(this);
+    m_historyList->setMaximumHeight(140);
+    m_ui->layout_Main->addWidget(historyLabel, 7, 0, 1, 2);
+    m_ui->layout_Main->addWidget(m_historyList, 8, 0, 1, 2);
+
+    QObject::connect(m_checkShowXyz, &QCheckBox::toggled, this, [this]{ this->recompute(false); });
+    QObject::connect(m_checkPointToPoint, &QCheckBox::toggled, this, [this]{ this->recompute(false); });
+
     this->updateMessagePanel();
 }
 
@@ -105,9 +302,30 @@ WidgetMeasure::~WidgetMeasure()
 void WidgetMeasure::setMeasureOn(bool on)
 {
     m_errorMessage.clear();
+    m_resultText.clear();
     auto gfxScene = m_guiDoc->graphicsScene();
     if (on) {
-        this->onMeasureTypeChanged(m_ui->combo_MeasureType->currentIndex());
+        if (m_historyList)
+            m_historyList->clear();   // start each measuring session fresh
+
+        if (getMeasureTools().empty())
+            getMeasureTools().push_back(std::make_unique<MeasureToolBRep>());
+
+        m_tool = getMeasureTools().front().get();
+
+        // SolidWorks-style: activate vertex + edge + face selection modes at once
+        // so the user can mix-click sub-shapes without switching tool modes.
+        gfxScene->clearSelection();
+        gfxScene->foreachDisplayedObject([&](const GraphicsObjectPtr& gfxObject) {
+            if (GuiDocument::isAisViewCubeObject(gfxObject))
+                return;
+
+            gfxScene->deactivateObjectSelection(gfxObject);
+            for (TopAbs_ShapeEnum t : { TopAbs_VERTEX, TopAbs_EDGE, TopAbs_FACE })
+                gfxScene->activateObjectSelection(gfxObject, AIS_Shape::SelectionMode(t));
+        });
+        gfxScene->redraw();
+
         m_connGraphicsSelectionChanged = gfxScene->signalSelectionChanged.connectSlot(
             &WidgetMeasure::onGraphicsSelectionChanged, this
         );
@@ -116,14 +334,19 @@ void WidgetMeasure::setMeasureOn(bool on)
         );
     }
     else {
+        this->clearAllMeasureDisplays();
         gfxScene->foreachDisplayedObject([=](const GraphicsObjectPtr& gfxObject) {
             gfxScene->deactivateObjectSelection(gfxObject);
             gfxScene->activateObjectSelection(gfxObject, 0);
         });
         gfxScene->clearSelection();
+        m_vecSelectedOwner.clear();
         m_connGraphicsSelectionChanged.disconnect();
         m_connDocumentEntityAdded.disconnect();
+        gfxScene->redraw();
     }
+
+    this->updateMessagePanel();
 }
 
 void WidgetMeasure::addTool(std::unique_ptr<IMeasureTool> tool)
@@ -275,122 +498,113 @@ MeasureDisplayConfig WidgetMeasure::currentMeasureDisplayConfig() const
 
 void WidgetMeasure::onGraphicsSelectionChanged()
 {
+    // Snapshot the full current selection set, then (re)compute. SolidWorks-style:
+    // we re-evaluate the whole set on every change rather than accumulating pairs.
+    std::vector<GraphicsOwnerPtr> owners;
+    m_guiDoc->graphicsScene()->foreachSelectedOwner([&](const GraphicsOwnerPtr& owner) {
+        owners.push_back(owner);
+    });
+    m_vecSelectedOwner = owners;
+    this->recompute(true);
+}
+
+void WidgetMeasure::recompute(bool addToHistory)
+{
     auto gfxScene = m_guiDoc->graphicsScene();
-    const std::vector<GraphicsOwnerPtr> vecSelectedOwner_onEntry = m_vecSelectedOwner;
-    std::vector<GraphicsOwnerPtr> vecNewSelected;
-    std::vector<GraphicsOwnerPtr> vecDeselected;
-    {
-        // Store currently selected graphics
-        std::vector<GraphicsOwnerPtr> vecSelected;
-        gfxScene->foreachSelectedOwner([&](const GraphicsOwnerPtr& owner) {
-            vecSelected.push_back(owner);
-        });
 
-        // Find new selected graphics
-        for (const GraphicsOwnerPtr& owner : vecSelected) {
-            auto itFound = std::find(m_vecSelectedOwner.begin(), m_vecSelectedOwner.end(), owner);
-            if (itFound == m_vecSelectedOwner.end())
-                vecNewSelected.push_back(owner);
-        }
-
-        // Find deselected graphics
-        for (const GraphicsOwnerPtr& owner : m_vecSelectedOwner) {
-            auto itFound = std::find(vecSelected.begin(), vecSelected.end(), owner);
-            if (itFound == vecSelected.end())
-                vecDeselected.push_back(owner);
-        }
-
-        m_vecSelectedOwner = std::move(vecSelected);
-    }
-
-    // Erase objects associated to deselected graphics
-    for (const GraphicsOwnerPtr& owner : vecDeselected) {
-        for (auto link = this->findLink(owner); link != nullptr; link = this->findLink(owner)) {
-            this->eraseMeasureDisplay(link->measureDisplay);
-            this->eraseLink(link);
-        }
-    }
-
-    m_guiDoc->graphicsScene()->redraw();
+    // Drop the previous on-screen callouts; they are rebuilt for the current set.
+    this->clearAllMeasureDisplays();
     m_errorMessage.clear();
+    m_resultText.clear();
 
-    // Exit if no measure tool available
-    if (!m_tool)
+    const std::vector<GraphicsOwnerPtr>& owners = m_vecSelectedOwner;
+    if (owners.empty()) {
+        gfxScene->redraw();
+        this->updateMessagePanel();
         return;
-
-    // Holds MeasureDisplay objects created for new selected graphics
-    std::vector<IMeasureDisplayPtr> vecNewMeasureDisplay;
-
-    // Helper to ease addition(registration) of MeasureDisplay object
-    auto fnAddMeasureDisplay = [&](
-            std::unique_ptr<IMeasureDisplay> ptr,
-            std::initializer_list<GraphicsOwnerPtr> listOwner)
-    {
-        if (ptr) {
-            vecNewMeasureDisplay.push_back(std::move(ptr));
-            for (const GraphicsOwnerPtr& owner : listOwner)
-                this->addLink(owner, vecNewMeasureDisplay.back());
-        }
-    };
-
-    const MeasureType measureType = this->currentMeasureType();
-    // Create MeasureDisplay objects needing a newly single selected graphics object
-    for (const GraphicsOwnerPtr& owner : vecNewSelected) {
-        try {
-            const MeasureValue value = IMeasureTool_computeValue(*m_tool, measureType, owner);
-            if (MeasureValue_isValid(value))
-                fnAddMeasureDisplay(BaseMeasureDisplay::createFrom(measureType, value), { owner });
-        } catch (const IMeasureError& err) {
-            m_errorMessage = to_QString(err.message());
-        }
     }
 
-    // Create MeasureDisplay objects needing currently two selected graphics objects
-    if (vecSelectedOwner_onEntry.size() >= 1) {
-        for (const GraphicsOwnerPtr& owner : vecNewSelected) {
-            const int indexOwner = Cpp::indexInSpan(vecNewSelected, owner);
-            const GraphicsOwnerPtr& prevOwner =
-                indexOwner == 0 ?
-                    vecSelectedOwner_onEntry.back() :
-                    vecNewSelected.at(indexOwner - 1)
-                ;
-            try {
-                const MeasureValue value = IMeasureTool_computeValue(*m_tool, measureType, prevOwner, owner);
-                if (MeasureValue_isValid(value))
-                    fnAddMeasureDisplay(BaseMeasureDisplay::createFrom(measureType, value), { prevOwner, owner });
-            } catch (const IMeasureError& err) {
-                m_errorMessage = to_QString(err.message());
+    // Owners -> raw shapes -> argos_core (the authoritative, Qt-free computation)
+    std::vector<TopoDS_Shape> shapes;
+    shapes.reserve(owners.size());
+    for (const GraphicsOwnerPtr& owner : owners) {
+        const TopoDS_Shape s = ownerToShape(owner);
+        if (!s.IsNull())
+            shapes.push_back(s);
+    }
+
+    argos::MeasureOptions opt;
+    opt.showXyz = !m_checkShowXyz || m_checkShowXyz->isChecked();
+    opt.pointToPoint = m_checkPointToPoint && m_checkPointToPoint->isChecked();
+
+    const argos::MeasureResult res = argos::dispatch(shapes, opt);
+    if (!res.ok) {
+        m_errorMessage = QString::fromStdString(res.error);
+    }
+    else {
+        m_resultText = formatArgosResult(res);
+        if (addToHistory && m_historyList) {
+            const QString line = formatArgosShort(res);
+            const int n = m_historyList->count();
+            if (!line.isEmpty() && (n == 0 || m_historyList->item(n - 1)->text() != line)) {
+                m_historyList->addItem(line);
+                constexpr int kMaxHistory = 200;
+                while (m_historyList->count() > kMaxHistory)
+                    delete m_historyList->takeItem(0);
             }
         }
     }
 
-    // Display new measure graphics objects
-    auto measureDisplayConfig = this->currentMeasureDisplayConfig();
-    for (IMeasureDisplayPtr& measure : vecNewMeasureDisplay) {
-        measure->update(measureDisplayConfig);
-        measure->adaptGraphics(gfxScene->v3dViewer()->Driver());
-        foreachGraphicsObject(measure, [=](const GraphicsObjectPtr& gfxObject) {
-            gfxScene->addObject(gfxObject, GraphicsScene::AddObjectDisableSelectionMode);
-        });
-
-        m_vecMeasureDisplay.push_back(std::move(measure));
+    // Reuse Mayo's mature on-screen callout for the simple 1- or 2-entity cases.
+    // The numbers shown in the panel always come from argos_core; the callout is
+    // only a graphical aid (best-effort).
+    if (m_tool && res.ok) {
+        const MeasureType mtype = mayoTypeFromKind(res.kind);
+        if (mtype != MeasureType::None && (owners.size() == 1 || owners.size() == 2)) {
+            try {
+                const MeasureValue value =
+                    owners.size() == 1 ?
+                        IMeasureTool_computeValue(*m_tool, mtype, owners[0]) :
+                        IMeasureTool_computeValue(*m_tool, mtype, owners[0], owners[1]);
+                if (MeasureValue_isValid(value)) {
+                    IMeasureDisplayPtr disp = BaseMeasureDisplay::createFrom(mtype, value);
+                    if (disp) {
+                        disp->update(this->currentMeasureDisplayConfig());
+                        disp->adaptGraphics(gfxScene->v3dViewer()->Driver());
+                        foreachGraphicsObject(disp, [=](const GraphicsObjectPtr& gfxObject) {
+                            gfxScene->addObject(gfxObject, GraphicsScene::AddObjectDisableSelectionMode);
+                        });
+                        m_vecMeasureDisplay.push_back(std::move(disp));
+                    }
+                }
+            }
+            catch (const IMeasureError&) {
+                // callout not available for this selection (e.g. cylindrical face)
+            }
+            catch (const Standard_Failure&) {
+                // OCCT rejected the callout (Mayo's edge-only angle callout on faces
+                // does TopoDS::Edge(face) -> throws); panel readout is authoritative
+            }
+            catch (...) {
+                // never let a best-effort graphical callout crash the measure tool
+            }
+        }
     }
 
+    gfxScene->redraw();
     this->updateMessagePanel();
 }
 
 void WidgetMeasure::onDocumentEntityAdded(TreeNodeId entityNodeId)
 {
-    if (!m_tool)
-        return;
-
-    auto measureType = this->currentMeasureType();
-    if (measureType == MeasureType::None)
-        return;
-
+    // Keep newly added entities measurable: activate vertex/edge/face modes.
+    auto gfxScene = m_guiDoc->graphicsScene();
     m_guiDoc->foreachGraphicsObject(entityNodeId, [=](const GraphicsObjectPtr& gfxObject) {
-        for (GraphicsObjectSelectionMode mode : m_tool->selectionModes(measureType))
-            m_guiDoc->graphicsScene()->activateObjectSelection(gfxObject, mode);
+        if (GuiDocument::isAisViewCubeObject(gfxObject))
+            return;
+
+        for (TopAbs_ShapeEnum t : { TopAbs_VERTEX, TopAbs_EDGE, TopAbs_FACE })
+            gfxScene->activateObjectSelection(gfxObject, AIS_Shape::SelectionMode(t));
     });
 }
 
@@ -403,8 +617,8 @@ void WidgetMeasure::updateMessagePanel()
         delete item;
     }
 
-    // Error message takes precedence
-    if (!m_errorMessage.isEmpty() || m_vecMeasureDisplay.empty()) {
+    // Error message takes precedence, then the argos result, then a hint.
+    if (!m_errorMessage.isEmpty() || m_resultText.isEmpty()) {
         auto labelMessage = new QLabel(m_ui->widget_Message);
         labelMessage->setContentsMargins(m_ui->layout_Main->contentsMargins());
         m_ui->layout_Message->addWidget(labelMessage);
@@ -421,34 +635,20 @@ void WidgetMeasure::updateMessagePanel()
                     .arg(mayoTheme()->color(msgTextColorRole).name(),
                          mayoTheme()->color(msgBackgroundColorRole).name())
         );
-        const QString msg = m_errorMessage.isEmpty() ? tr("Select entities to measure") : m_errorMessage;
+        const QString msg = m_errorMessage.isEmpty()
+                ? tr("측정할 형상을 선택하세요 (점 · 모서리 · 면)")
+                : m_errorMessage;
         labelMessage->setText(msg);
     }
     else {
-        // The font to be used for measure results
+        // SolidWorks-style single readout for the whole selection set, computed
+        // by argos_core.
         const QFont fontResult = QFontDatabase::systemFont(QFontDatabase::FixedFont);
-        // Helper function to add the text of an IMeasureDisplay object in the message panel
-        auto fnAddMeasureText = [=](const IMeasureDisplayPtr& measure) {
-            auto label = new QLabel(to_QString(measure->text()), m_ui->widget_Message);
-            label->setFont(fontResult);
-            m_ui->layout_Message->addWidget(label);
-        };
-
-        // Add measure texts to the message panel
-        for (const IMeasureDisplayPtr& measure : m_vecMeasureDisplay)
-            fnAddMeasureText(measure);
-
-        // Handle the case where there are many measures and sum is a supported operation
-        if (m_vecMeasureDisplay.size() > 1) {
-            auto sumMeasure = BaseMeasureDisplay::createEmptySum(this->currentMeasureType());
-            if (sumMeasure && sumMeasure->isSumSupported()) {
-                for (const IMeasureDisplayPtr& measure : m_vecMeasureDisplay)
-                    sumMeasure->sumAdd(*measure);
-
-                sumMeasure->update(this->currentMeasureDisplayConfig());
-                fnAddMeasureText(sumMeasure);
-            }
-        }
+        auto label = new QLabel(m_resultText, m_ui->widget_Message);
+        label->setFont(fontResult);
+        label->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        label->setWordWrap(true);
+        m_ui->layout_Message->addWidget(label);
     }
 
     emit this->sizeAdjustmentRequested();
@@ -471,6 +671,19 @@ void WidgetMeasure::eraseMeasureDisplay(const IMeasureDisplay* measure)
 
         m_vecMeasureDisplay.erase(it);
     }
+}
+
+void WidgetMeasure::clearAllMeasureDisplays()
+{
+    auto gfxScene = m_guiDoc->graphicsScene();
+    for (const IMeasureDisplayPtr& measure : m_vecMeasureDisplay) {
+        foreachGraphicsObject(measure, [&](const GraphicsObjectPtr& gfxObject) {
+            gfxScene->eraseObject(gfxObject);
+        });
+    }
+
+    m_vecMeasureDisplay.clear();
+    m_vecLinkGfxOwnerMeasure.clear();
 }
 
 void WidgetMeasure::addLink(const GraphicsOwnerPtr& owner, const IMeasureDisplayPtr& measure)

@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<style>
+:root{
+  --backdrop:#cbd0d6;
+  --win:#f4f5f6; --chrome:#ececec; --chrome2:#e3e3e3; --titlebar:#e6e7e9;
+  --panel:#fafafa; --panel-head:#eaebed; --dock:#f2f3f4;
+  --border:#d2d4d7; --border-strong:#b7babf;
+  --text:#222426; --text-dim:#6a6e73; --text-mute:#9aa0a6;
+  --accent:#1f6fc2; --accent-soft:#dbeafa; --sel:#d2e5fa; --hover:#e6e8ea;
+  --vp1:#eef3f7; --vp2:#c9d3dc; --dim:#c07d12; --icon:#52565b;
+  --good:#2f9e6f; --chipbg:#e7f0fb;
+}
+[data-theme="dark"]{
+  --backdrop:#141618;
+  --win:#202225; --chrome:#2a2c2f; --chrome2:#313437; --titlebar:#26282b;
+  --panel:#26282b; --panel-head:#2e3134; --dock:#232528;
+  --border:#3a3d41; --border-strong:#494d52; --text:#e7e9eb; --text-dim:#a4a9af;
+  --text-mute:#777c82; --accent:#3d92e6;
+  --hover:#34373b; --vp1:#3b424a; --vp2:#21262c; --dim:#e1a73d; --icon:#c6cacd;
+  --good:#46c08a; --chipbg:#223347;
+}
+[data-theme="dark"]{ --accent-soft:#1d3a59; --sel:#284a6e; }
+*{box-sizing:border-box}
+body{margin:0;font-family:Pretendard,system-ui,-apple-system,'Segoe UI',sans-serif;-webkit-font-smoothing:antialiased}
+@keyframes selpulse{0%,100%{opacity:.95}50%{opacity:.62}}
+.scry::-webkit-scrollbar{width:11px;height:11px}
+.scry::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:6px;border:3px solid transparent;background-clip:padding-box}
+.scry::-webkit-scrollbar-track{background:transparent}
+</style>
+</helmet>
+
+<div style="min-width:100%;width:max-content;min-height:100vh;background:var(--backdrop);padding:30px 40px 56px;box-sizing:border-box">
+
+  <!-- presentation bar -->
+  <div style="width:1512px;display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;color:#e8eaed">
+    <div style="display:flex;flex-direction:column;gap:3px">
+      <div style="font-size:18px;font-weight:700;letter-spacing:-.01em;color:#1c1e21;background:transparent">3D CAD 뷰어 — 측정 도구 UX</div>
+      <div style="font-size:12.5px;color:#5b6066">STEP / IGES / STL · Windows 데스크톱 · Qt 도킹 패널</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:14px">
+      <div style="display:flex;background:#1d2024;border-radius:9px;padding:4px;gap:3px">
+        <button onClick="{{ goBase }}" style="{{ metaBase }}">기본 화면</button>
+        <button onClick="{{ goMeasure }}" style="{{ metaMeasure }}">측정 도구</button>
+        <button onClick="{{ goSection }}" style="{{ metaSection }}">단면 도구</button>
+      </div>
+      <button onClick="{{ toggleTheme }}" style="display:flex;align-items:center;gap:7px;padding:8px 14px;border:1px solid #34383d;background:#1d2024;color:#cfd3d8;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">
+        <span style="width:9px;height:9px;border-radius:50%;background:{{ themeDot }};display:inline-block"></span>{{ themeLabel }}
+      </button>
+    </div>
+  </div>
+
+  <!-- ===================== APP WINDOW ===================== -->
+  <div data-theme="{{ theme }}" style="width:1512px;height:912px;background:var(--win);border:1px solid var(--border-strong);border-radius:9px;overflow:hidden;box-shadow:0 24px 70px rgba(0,0,0,.34);display:flex;flex-direction:column;color:var(--text)">
+
+    <!-- titlebar -->
+    <div style="height:34px;flex:none;background:var(--titlebar);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 4px 0 12px;gap:10px">
+      <div style="width:15px;height:15px;border-radius:3px;background:linear-gradient(135deg,#2f7fd4,#1c5fa8);display:flex;align-items:center;justify-content:center;color:#fff;font-size:9px;font-weight:800">C</div>
+      <div style="font-size:12.5px;color:var(--text-dim)">액추에이터_어셈블리.STEP — CADVue</div>
+      <div style="flex:1"></div>
+      <div style="display:flex;gap:2px">
+        <div style="width:42px;height:30px;display:flex;align-items:center;justify-content:center;color:var(--text-dim)"><svg width="11" height="11" viewBox="0 0 12 12"><line x1="1" y1="10" x2="11" y2="10" stroke="currentColor" stroke-width="1.2"/></svg></div>
+        <div style="width:42px;height:30px;display:flex;align-items:center;justify-content:center;color:var(--text-dim)"><svg width="10" height="10" viewBox="0 0 12 12"><rect x="1.5" y="1.5" width="9" height="9" fill="none" stroke="currentColor" stroke-width="1.2"/></svg></div>
+        <div style="width:42px;height:30px;display:flex;align-items:center;justify-content:center;color:var(--text-dim);border-radius:5px" style-hover="background:#e1473d;color:#fff"><svg width="11" height="11" viewBox="0 0 12 12"><line x1="2" y1="2" x2="10" y2="10" stroke="currentColor" stroke-width="1.3"/><line x1="10" y1="2" x2="2" y2="10" stroke="currentColor" stroke-width="1.3"/></svg></div>
+      </div>
+    </div>
+
+    <!-- menubar -->
+    <div style="height:30px;flex:none;background:var(--chrome);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 6px;gap:1px;font-size:12.5px">
+      <div style="padding:5px 11px;border-radius:5px;color:var(--text)" style-hover="background:var(--hover)">파일</div>
+      <div style="padding:5px 11px;border-radius:5px;color:var(--text)" style-hover="background:var(--hover)">편집</div>
+      <div style="padding:5px 11px;border-radius:5px;color:var(--text)" style-hover="background:var(--hover)">보기</div>
+      <div style="padding:5px 11px;border-radius:5px;color:var(--text)" style-hover="background:var(--hover)">삽입</div>
+      <div style="padding:5px 11px;border-radius:5px;color:var(--text)" style-hover="background:var(--hover)">도구</div>
+      <div style="padding:5px 11px;border-radius:5px;color:var(--text)" style-hover="background:var(--hover)">측정</div>
+      <div style="padding:5px 11px;border-radius:5px;color:var(--text)" style-hover="background:var(--hover)">창</div>
+      <div style="padding:5px 11px;border-radius:5px;color:var(--text)" style-hover="background:var(--hover)">도움말</div>
+    </div>
+
+    <!-- toolbar -->
+    <div style="height:46px;flex:none;background:var(--chrome2);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 10px;gap:4px">
+      <button title="파일 열기" style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid transparent;border-radius:5px;background:transparent;color:var(--icon);cursor:pointer" style-hover="background:var(--hover)">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a1 1 0 0 1 1-1h5l2 2h8a1 1 0 0 1 1 1v3H3z"/><path d="M3 12h17l-1.6 6a1 1 0 0 1-1 .8H4.6a1 1 0 0 1-1-.8z"/></svg>
+      </button>
+      <button title="저장" style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid transparent;border-radius:5px;background:transparent;color:var(--icon);cursor:pointer" style-hover="background:var(--hover)">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h12l3 3v13H4z"/><path d="M8 4v5h7V4"/><rect x="8" y="13" width="8" height="6"/></svg>
+      </button>
+
+      <div style="width:1px;height:24px;background:var(--border);margin:0 6px"></div>
+
+      <button title="화면 맞춤" style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid transparent;border-radius:5px;background:transparent;color:var(--icon);cursor:pointer" style-hover="background:var(--hover)">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V5h4M20 9V5h-4M4 15v4h4M20 15v4h-4"/></svg>
+      </button>
+      <button title="뷰 정렬" style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid transparent;border-radius:5px;background:transparent;color:var(--icon);cursor:pointer" style-hover="background:var(--hover)">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 4.2v9.6L12 21l-8-4.2V7.2z"/><path d="M4 7.2l8 4.2 8-4.2M12 11.4V21"/></svg>
+      </button>
+
+      <div style="width:1px;height:24px;background:var(--border);margin:0 6px"></div>
+
+      <button title="와이어프레임" style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid transparent;border-radius:5px;background:transparent;color:var(--icon);cursor:pointer" style-hover="background:var(--hover)">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.4"/><ellipse cx="12" cy="12" rx="3.6" ry="8.4"/><line x1="3.6" y1="12" x2="20.4" y2="12"/></svg>
+      </button>
+      <button title="음영 표시 + 모서리" style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid var(--accent);border-radius:5px;background:var(--accent-soft);color:var(--accent);cursor:pointer">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.4" fill="currentColor" fill-opacity="0.16"/><path d="M6 8.5a8.4 8.4 0 0 1 10.5-1.2"/></svg>
+      </button>
+      <button title="음영 표시" style="display:flex;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid transparent;border-radius:5px;background:transparent;color:var(--icon);cursor:pointer" style-hover="background:var(--hover)">
+        <svg width="19" height="19" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.4" fill="currentColor" fill-opacity="0.5"/><circle cx="9.4" cy="9.4" r="2.4" fill="#fff" fill-opacity="0.55"/></svg>
+      </button>
+
+      <div style="width:1px;height:24px;background:var(--border);margin:0 6px"></div>
+
+      <button title="측정" onClick="{{ goMeasure }}" style="{{ toolMeasure }}">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="8" width="19" height="8" rx="1" transform="rotate(-12 12 12)"/><path d="M7 8.7l1 2M11 7.8l1.2 2.6M15 6.9l1 2"/></svg>
+        <span style="font-size:12.5px;font-weight:600">측정</span>
+      </button>
+      <button title="단면" onClick="{{ goSection }}" style="{{ toolSection }}">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l13-2v11L4 17z" fill="currentColor" fill-opacity="0.14"/><path d="M9 5.2v11"/><line x1="4" y1="17" x2="20" y2="13"/></svg>
+        <span style="font-size:12.5px;font-weight:600">단면</span>
+      </button>
+
+      <div style="flex:1"></div>
+      <div style="display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-mute);padding-right:6px">
+        <div style="width:10px;height:10px;border-radius:50%;background:var(--good)"></div>STEP 파일 불러옴 · 4 부품
+      </div>
+    </div>
+
+    <!-- BODY: docks + viewport -->
+    <div style="flex:1;display:flex;min-height:0;background:var(--win)">
+
+      <!-- LEFT DOCK: tree -->
+      <div style="width:262px;flex:none;background:var(--dock);border-right:1px solid var(--border);display:flex;flex-direction:column;min-height:0">
+        <div style="height:32px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 10px 0 12px;border-bottom:1px solid var(--border);background:var(--panel-head)">
+          <span style="font-size:12px;font-weight:700;letter-spacing:.01em">모델 트리</span>
+          <div style="display:flex;gap:8px;color:var(--text-mute)">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="6" cy="6" r="4"/><line x1="9" y1="9" x2="13" y2="13" stroke-linecap="round"/></svg>
+          </div>
+        </div>
+        <div class="scry" style="flex:1;overflow-y:auto;padding:6px 4px;font-size:12.5px">
+          <div style="display:flex;align-items:center;gap:6px;padding:4px 8px;font-weight:700">
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="var(--text-dim)"><path d="M2 1l5 4-5 4z"/></svg>
+            <span style="width:15px;height:15px;border:1.5px solid var(--accent);border-radius:3px;background:var(--accent);display:flex;align-items:center;justify-content:center"><svg width="9" height="9" viewBox="0 0 12 12" stroke="#fff" stroke-width="2" fill="none"><path d="M2 6l3 3 5-6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+            액추에이터_어셈블리
+          </div>
+          <div style="padding-left:16px">
+            <div style="display:flex;align-items:center;gap:6px;padding:4px 8px;color:var(--text-dim)"><span style="width:10px"></span><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="1.4" fill="currentColor"/><line x1="8" y1="1" x2="8" y2="15"/><line x1="1" y1="8" x2="15" y2="8"/></svg>원점</div>
+            <div style="display:flex;align-items:center;gap:6px;padding:4px 8px;color:var(--text-dim)"><svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor"><path d="M2 1l5 4-5 4z"/></svg><svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" fill-opacity="0.5" stroke="currentColor" stroke-width="0.8"><path d="M2 4l10-2v10L2 12z"/></svg>평면들</div>
+
+            <div style="display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:4px;background:var(--sel)">
+              <span style="width:10px"></span>
+              <span style="width:15px;height:15px;border:1.5px solid var(--accent);border-radius:3px;background:var(--accent);display:flex;align-items:center;justify-content:center;flex:none"><svg width="9" height="9" viewBox="0 0 12 12" stroke="#fff" stroke-width="2" fill="none"><path d="M2 6l3 3 5-6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--accent)" stroke-width="1.3"><circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="2"/><path d="M8 2v2M8 12v2M2 8h2M12 8h2"/></svg>
+              <span style="font-weight:600">기어_구동.STEP</span>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:7px;padding:5px 8px">
+              <span style="width:10px"></span>
+              <span style="width:15px;height:15px;border:1.5px solid var(--accent);border-radius:3px;background:var(--accent);display:flex;align-items:center;justify-content:center;flex:none"><svg width="9" height="9" viewBox="0 0 12 12" stroke="#fff" stroke-width="2" fill="none"><path d="M2 6l3 3 5-6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--text-dim)" stroke-width="1.3"><rect x="2" y="6" width="12" height="4" rx="1"/></svg>
+              샤프트.STEP
+            </div>
+
+            <div style="display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:4px;background:var(--sel)">
+              <span style="width:10px"></span>
+              <span style="width:15px;height:15px;border:1.5px solid var(--accent);border-radius:3px;background:var(--accent);display:flex;align-items:center;justify-content:center;flex:none"><svg width="9" height="9" viewBox="0 0 12 12" stroke="#fff" stroke-width="2" fill="none"><path d="M2 6l3 3 5-6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--accent)" stroke-width="1.3"><circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="1.4"/></svg>
+              <span style="font-weight:600">플랜지_캡.STEP</span>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:7px;padding:5px 8px">
+              <span style="width:10px"></span>
+              <span style="width:15px;height:15px;border:1.5px solid var(--accent);border-radius:3px;background:var(--accent);display:flex;align-items:center;justify-content:center;flex:none"><svg width="9" height="9" viewBox="0 0 12 12" stroke="#fff" stroke-width="2" fill="none"><path d="M2 6l3 3 5-6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--text-dim)" stroke-width="1.3"><rect x="2" y="5" width="12" height="6"/></svg>
+              베이스_플레이트.STEP
+            </div>
+
+            <div style="display:flex;align-items:center;gap:7px;padding:5px 8px;color:var(--text-mute)">
+              <span style="width:10px"></span>
+              <span style="width:15px;height:15px;border:1.5px solid var(--border-strong);border-radius:3px;background:var(--panel);display:flex;align-items:center;justify-content:center;flex:none"></span>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="5" cy="5" r="2.4"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg>
+              커버.STEP <span style="font-size:10.5px">(숨김)</span>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:6px;padding:4px 8px;color:var(--text-dim)"><svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor"><path d="M2 1l5 4-5 4z"/></svg><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M5 8a3 3 0 0 1 3-3M11 8a3 3 0 0 1-3 3" stroke-linecap="round"/><circle cx="8" cy="8" r="6.4" stroke-dasharray="1.5 2"/></svg>메이트</div>
+          </div>
+        </div>
+        <div style="flex:none;border-top:1px solid var(--border);padding:7px 12px;font-size:11px;color:var(--text-mute);background:var(--panel-head)">5 부품 · 4 표시 · 1 숨김</div>
+      </div>
+
+      <!-- CENTER VIEWPORT -->
+      <div style="flex:1;position:relative;min-width:0;overflow:hidden;background:radial-gradient(120% 120% at 50% 18%,var(--vp1),var(--vp2))">
+
+        <!-- model + overlays box (760x520 coordinate space) -->
+        <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:760px;height:520px">
+
+          <sc-if value="{{ isSection }}" hint-placeholder-val="{{ false }}">
+            <img src="part_section.svg" width="760" height="520" style="position:absolute;inset:0;display:block;filter:drop-shadow(0 18px 22px rgba(20,30,45,.22))"/>
+          </sc-if>
+          <sc-if value="{{ notSection }}" hint-placeholder-val="{{ true }}">
+            <img src="part.svg" width="760" height="520" style="position:absolute;inset:0;display:block;filter:drop-shadow(0 18px 22px rgba(20,30,45,.22))"/>
+          </sc-if>
+
+          <!-- MEASURE overlay -->
+          <sc-if value="{{ isMeasure }}" hint-placeholder-val="{{ false }}">
+            <svg width="760" height="520" viewBox="0 0 760 520" style="position:absolute;inset:0;overflow:visible">
+              <!-- selected face 1 (gear) -->
+              <ellipse cx="300" cy="300" rx="112" ry="72" fill="#2f9e6f" fill-opacity="0.22" stroke="#23895f" stroke-width="2.2" style="animation:selpulse 2.2s ease-in-out infinite"/>
+              <!-- selected face 2 (flange) -->
+              <ellipse cx="612" cy="300" rx="18" ry="72" fill="#1f6fc2" fill-opacity="0.34" stroke="#1f6fc2" stroke-width="2.2" style="animation:selpulse 2.2s ease-in-out infinite"/>
+              <!-- ref points -->
+              <rect x="295" y="295" width="10" height="10" fill="#23895f" stroke="#fff" stroke-width="1.4"/>
+              <rect x="607" y="295" width="10" height="10" fill="#1f6fc2" stroke="#fff" stroke-width="1.4"/>
+              <!-- dimension line below -->
+              <line x1="300" y1="372" x2="300" y2="486" stroke="var(--dim)" stroke-width="1.1" stroke-dasharray="3 3"/>
+              <line x1="612" y1="372" x2="612" y2="486" stroke="var(--dim)" stroke-width="1.1" stroke-dasharray="3 3"/>
+              <line x1="300" y1="478" x2="612" y2="478" stroke="var(--dim)" stroke-width="1.7"/>
+              <path d="M300 478l11-4v8z" fill="var(--dim)"/>
+              <path d="M612 478l-11-4v8z" fill="var(--dim)"/>
+              <rect x="416" y="466" width="80" height="24" rx="4" fill="#fff" stroke="var(--dim)" stroke-width="1.3"/>
+              <text x="456" y="482" text-anchor="middle" font-family="Pretendard,sans-serif" font-size="14" font-weight="700" fill="#7a4f08">84.00 mm</text>
+              <!-- leader to floating tag -->
+              <line x1="456" y1="300" x2="540" y2="150" stroke="#5b6066" stroke-width="1"/>
+              <circle cx="456" cy="300" r="3" fill="#5b6066"/>
+            </svg>
+            <!-- floating measurement tag (SW-style) -->
+            <div style="position:absolute;left:540px;top:96px;background:rgba(255,255,255,.97);border:1px solid var(--border-strong);border-radius:7px;box-shadow:0 10px 24px rgba(0,0,0,.16);padding:9px 11px;font-size:12px;min-width:150px;color:#222">
+              <div style="display:flex;justify-content:space-between;gap:18px;margin-bottom:4px"><span style="color:#6a6e73">거리</span><b style="font-variant-numeric:tabular-nums">84.00 mm</b></div>
+              <div style="height:1px;background:#e4e6e9;margin:5px 0"></div>
+              <div style="display:flex;justify-content:space-between;gap:18px"><span style="color:#c2453a">ΔX</span><span style="font-variant-numeric:tabular-nums">76.20</span></div>
+              <div style="display:flex;justify-content:space-between;gap:18px"><span style="color:#2f9e6f">ΔY</span><span style="font-variant-numeric:tabular-nums">31.75</span></div>
+              <div style="display:flex;justify-content:space-between;gap:18px"><span style="color:#1f6fc2">ΔZ</span><span style="font-variant-numeric:tabular-nums">12.70</span></div>
+            </div>
+          </sc-if>
+
+          <!-- SECTION overlay -->
+          <sc-if value="{{ isSection }}" hint-placeholder-val="{{ false }}">
+            <svg width="760" height="520" viewBox="0 0 760 520" style="position:absolute;inset:0;overflow:visible">
+              <polygon points="468,118 468,470 512,444 512,92" fill="#1f6fc2" fill-opacity="0.12" stroke="#1f6fc2" stroke-width="1.5" stroke-dasharray="6 4"/>
+              <rect x="463" y="113" width="10" height="10" fill="#fff" stroke="#1f6fc2" stroke-width="1.6"/>
+              <rect x="463" y="465" width="10" height="10" fill="#fff" stroke="#1f6fc2" stroke-width="1.6"/>
+              <rect x="507" y="87" width="10" height="10" fill="#fff" stroke="#1f6fc2" stroke-width="1.6"/>
+              <!-- offset arrow (normal) -->
+              <line x1="430" y1="150" x2="500" y2="150" stroke="#1f6fc2" stroke-width="1.4"/>
+              <path d="M500 150l-10-4v8z" fill="#1f6fc2"/>
+              <path d="M430 150l10-4v8z" fill="#1f6fc2"/>
+            </svg>
+            <div style="position:absolute;left:392px;top:118px;background:rgba(255,255,255,.97);border:1px solid var(--border-strong);border-radius:6px;padding:4px 8px;font-size:11.5px;font-weight:700;color:#1f6fc2;font-variant-numeric:tabular-nums">YZ · 옵셋 12.50 mm</div>
+          </sc-if>
+        </div>
+
+        <!-- ViewCube -->
+        <div style="position:absolute;top:18px;right:20px;width:96px;height:96px">
+          <svg width="96" height="96" viewBox="0 0 96 96">
+            <polygon points="48,10 82,26 48,42 14,26" fill="#e9edf1" stroke="#9aa3ab" stroke-width="1"/>
+            <polygon points="14,26 48,42 48,82 14,66" fill="#cfd6dd" stroke="#9aa3ab" stroke-width="1"/>
+            <polygon points="82,26 48,42 48,82 82,66" fill="#b9c2cb" stroke="#9aa3ab" stroke-width="1"/>
+            <text x="48" y="29" text-anchor="middle" font-size="10" font-weight="700" fill="#5b6066">윗면</text>
+            <text x="30" y="58" text-anchor="middle" font-size="9.5" font-weight="700" fill="#4a5056">정면</text>
+            <text x="66" y="58" text-anchor="middle" font-size="9.5" font-weight="700" fill="#3f454b">우측</text>
+          </svg>
+          <svg width="20" height="20" viewBox="0 0 20 20" style="position:absolute;top:38px;left:-14px;color:var(--text-mute)" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 5l-5 5 5 5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <svg width="20" height="20" viewBox="0 0 20 20" style="position:absolute;top:38px;right:-14px;color:var(--text-mute)" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 5l5 5-5 5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+
+        <!-- coordinate triad -->
+        <svg width="92" height="86" viewBox="0 0 92 86" style="position:absolute;left:16px;bottom:14px">
+          <line x1="26" y1="60" x2="80" y2="68" stroke="#d6453b" stroke-width="2.2" stroke-linecap="round"/>
+          <text x="84" y="72" font-size="12" font-weight="800" fill="#d6453b">X</text>
+          <line x1="26" y1="60" x2="8" y2="44" stroke="#2f9e6f" stroke-width="2.2" stroke-linecap="round"/>
+          <text x="0" y="40" font-size="12" font-weight="800" fill="#2f9e6f">Y</text>
+          <line x1="26" y1="60" x2="26" y2="12" stroke="#2f7fd4" stroke-width="2.2" stroke-linecap="round"/>
+          <text x="22" y="10" font-size="12" font-weight="800" fill="#2f7fd4">Z</text>
+          <circle cx="26" cy="60" r="3.2" fill="var(--text-dim)"/>
+        </svg>
+
+        <!-- viewport corner hint -->
+        <div style="position:absolute;left:16px;top:14px;font-size:11.5px;color:var(--text-mute);background:transparent">등각 보기 · 음영 표시(모서리)</div>
+      </div>
+
+      <!-- RIGHT DOCK: tool panel -->
+      <sc-if value="{{ showRightDock }}" hint-placeholder-val="{{ true }}">
+      <div style="width:306px;flex:none;background:var(--panel);border-left:1px solid var(--border);display:flex;flex-direction:column;min-height:0">
+
+        <!-- MEASURE PANEL -->
+        <sc-if value="{{ isMeasure }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;flex-direction:column;min-height:0;height:100%">
+          <!-- header -->
+          <div style="height:38px;flex:none;display:flex;align-items:center;gap:8px;padding:0 8px 0 13px;border-bottom:1px solid var(--border);background:var(--panel-head)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="8" width="19" height="8" rx="1" transform="rotate(-12 12 12)"/><path d="M7 8.7l1 2M11 7.8l1.2 2.6M15 6.9l1 2"/></svg>
+            <span style="font-size:13px;font-weight:700;flex:1">측정</span>
+            <button style="width:24px;height:24px;border:none;background:transparent;color:var(--text-mute);cursor:pointer;display:flex;align-items:center;justify-content:center" style-hover="background:var(--hover);border-radius:4px"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 2v8M5 6l3-3 3 3M3 13h10" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+            <button style="width:24px;height:24px;border:none;background:transparent;color:var(--text-mute);cursor:pointer;display:flex;align-items:center;justify-content:center" style-hover="background:var(--hover);border-radius:4px"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6l5 5 5-5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+            <button onClick="{{ goBase }}" style="width:24px;height:24px;border:none;background:transparent;color:var(--text-mute);cursor:pointer;display:flex;align-items:center;justify-content:center" style-hover="background:#e1473d;color:#fff;border-radius:4px"><svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 2l8 8M10 2l-8 8" stroke-linecap="round"/></svg></button>
+          </div>
+
+          <!-- option bar -->
+          <div style="flex:none;display:flex;align-items:center;gap:2px;padding:6px 8px;border-bottom:1px solid var(--border);background:var(--panel)">
+            <button title="단위 / 정밀도" style="display:flex;align-items:center;gap:3px;height:28px;padding:0 7px;border:1px solid var(--border);border-radius:5px;background:var(--win);color:var(--text);cursor:pointer;font-size:11.5px;font-weight:600" style-hover="background:var(--hover)">mm <span style="color:var(--text-mute);font-weight:400">.00</span><svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M3 5l3 3 3-3" stroke-linecap="round"/></svg></button>
+            <button title="XYZ 측정 표시" style="display:flex;align-items:center;justify-content:center;width:30px;height:28px;border:1px solid var(--accent);border-radius:5px;background:var(--accent-soft);color:var(--accent);cursor:pointer;font-size:10.5px;font-weight:800;letter-spacing:-.02em">XYZ</button>
+            <button title="점-대-점 (Point-to-Point)" style="display:flex;align-items:center;justify-content:center;width:30px;height:28px;border:1px solid var(--border);border-radius:5px;background:var(--win);color:var(--icon);cursor:pointer" style-hover="background:var(--hover)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="5" cy="12" r="2.2" fill="currentColor"/><circle cx="19" cy="12" r="2.2" fill="currentColor"/><line x1="7.5" y1="12" x2="16.5" y2="12" stroke-dasharray="2 2"/></svg></button>
+            <button title="원/호 측정 모드" style="display:flex;align-items:center;gap:2px;height:28px;padding:0 6px;border:1px solid var(--border);border-radius:5px;background:var(--win);color:var(--icon);cursor:pointer" style-hover="background:var(--hover)"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 14a8 8 0 0 1 16 0" stroke-linecap="round"/><circle cx="12" cy="14" r="1.6" fill="currentColor"/></svg><svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M3 5l3 3 3-3" stroke-linecap="round"/></svg></button>
+            <button title="기준 좌표계" style="display:flex;align-items:center;justify-content:center;width:30px;height:28px;border:1px solid var(--border);border-radius:5px;background:var(--win);color:var(--icon);cursor:pointer" style-hover="background:var(--hover)"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 18L17 7M6 18l-2-3M6 18l3 2M17 7V4M17 7h3"/></svg></button>
+            <button title="투영 (Projected On)" style="display:flex;align-items:center;justify-content:center;width:30px;height:28px;border:1px solid var(--border);border-radius:5px;background:var(--win);color:var(--icon);cursor:pointer" style-hover="background:var(--hover)"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 8l8-3 8 3v8l-8 3-8-3z"/><path d="M12 5v14" stroke-dasharray="2 2"/></svg></button>
+          </div>
+
+          <div class="scry" style="flex:1;overflow-y:auto;padding:12px 13px 14px">
+            <!-- selection box -->
+            <div style="font-size:11px;font-weight:700;color:var(--text-dim);margin-bottom:6px;letter-spacing:.02em">선택 항목</div>
+            <div style="border:1px solid var(--accent);border-radius:6px;background:var(--accent-soft);padding:8px;display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px">
+              <span style="display:flex;align-items:center;gap:5px;background:var(--win);border:1px solid var(--border);border-radius:5px;padding:4px 8px;font-size:12px;font-weight:600"><span style="width:9px;height:9px;border-radius:2px;background:#23895f"></span>면&lt;1&gt;</span>
+              <span style="display:flex;align-items:center;gap:5px;background:var(--win);border:1px solid var(--border);border-radius:5px;padding:4px 8px;font-size:12px;font-weight:600"><span style="width:9px;height:9px;border-radius:2px;background:#1f6fc2"></span>면&lt;2&gt;</span>
+              <span style="display:flex;align-items:center;color:var(--text-mute);font-size:11.5px;padding:4px 2px">두 평행면</span>
+            </div>
+
+            <!-- primary distance -->
+            <div style="border:1px solid var(--border);border-radius:8px;background:var(--win);padding:13px 14px;margin-bottom:12px">
+              <div style="font-size:11px;color:var(--text-dim);font-weight:600;margin-bottom:3px">거리 (법선)</div>
+              <div style="font-size:28px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--accent)">84.00<span style="font-size:14px;font-weight:600;color:var(--text-dim);margin-left:5px">mm</span></div>
+            </div>
+
+            <!-- dXYZ grid -->
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px">
+              <div style="border:1px solid var(--border);border-radius:7px;background:var(--win);padding:8px 9px">
+                <div style="font-size:11px;font-weight:700;color:#c2453a;margin-bottom:2px">ΔX</div>
+                <div style="font-size:15px;font-weight:700;font-variant-numeric:tabular-nums">76.20</div>
+              </div>
+              <div style="border:1px solid var(--border);border-radius:7px;background:var(--win);padding:8px 9px">
+                <div style="font-size:11px;font-weight:700;color:#2f9e6f;margin-bottom:2px">ΔY</div>
+                <div style="font-size:15px;font-weight:700;font-variant-numeric:tabular-nums">31.75</div>
+              </div>
+              <div style="border:1px solid var(--border);border-radius:7px;background:var(--win);padding:8px 9px">
+                <div style="font-size:11px;font-weight:700;color:#1f6fc2;margin-bottom:2px">ΔZ</div>
+                <div style="font-size:15px;font-weight:700;font-variant-numeric:tabular-nums">12.70</div>
+              </div>
+            </div>
+
+            <!-- secondary rows -->
+            <div style="border:1px solid var(--border);border-radius:7px;background:var(--win);overflow:hidden;margin-bottom:18px">
+              <div style="display:flex;justify-content:space-between;padding:8px 12px;font-size:12.5px;border-bottom:1px solid var(--border)"><span style="color:var(--text-dim)">각도</span><span style="font-weight:600;font-variant-numeric:tabular-nums">0.00°</span></div>
+              <div style="display:flex;justify-content:space-between;padding:8px 12px;font-size:12.5px;border-bottom:1px solid var(--border)"><span style="color:var(--text-dim)">전체 거리</span><span style="font-weight:600;font-variant-numeric:tabular-nums">84.00 mm</span></div>
+              <div style="display:flex;justify-content:space-between;padding:8px 12px;font-size:12.5px;border-bottom:1px solid var(--border)"><span style="color:var(--text-dim)">면적 (면&lt;1&gt;)</span><span style="font-weight:600;font-variant-numeric:tabular-nums">38.48 cm²</span></div>
+              <div style="display:flex;justify-content:space-between;padding:8px 12px;font-size:12.5px"><span style="color:var(--text-dim)">투영 기준</span><span style="font-weight:600;color:var(--text-mute)">없음</span></div>
+            </div>
+
+            <!-- history -->
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px">
+              <span style="font-size:11.5px;font-weight:700;color:var(--text-dim);letter-spacing:.02em">측정 이력</span>
+              <span style="font-size:11px;color:var(--text-mute);cursor:pointer">모두 지우기</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:5px">
+              <div style="display:flex;align-items:center;gap:9px;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--win)" style-hover="border-color:var(--accent)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="1.7"><path d="M4 12h16M4 12l4-4M4 12l4 4M20 12l-4-4M20 12l-4 4"/></svg>
+                <span style="flex:1;font-size:12px;color:var(--text-dim)">면&lt;3&gt; ↔ 면&lt;4&gt;</span>
+                <span style="font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums">142.00 mm</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:9px;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--win)" style-hover="border-color:var(--accent)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="1.7" stroke-linecap="round"><path d="M5 19L12 5M5 19h14M9 13a6 6 0 0 0 4 2"/></svg>
+                <span style="flex:1;font-size:12px;color:var(--text-dim)">모서리&lt;1&gt; ∠ 모서리&lt;2&gt;</span>
+                <span style="font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums">90.00°</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:9px;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--win)" style-hover="border-color:var(--accent)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="1.7"><circle cx="12" cy="12" r="7"/><line x1="12" y1="12" x2="19" y2="12"/></svg>
+                <span style="flex:1;font-size:12px;color:var(--text-dim)">원호&lt;1&gt; (지름)</span>
+                <span style="font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums">⌀ 32.00 mm</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:9px;padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--win)" style-hover="border-color:var(--accent)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="1.7" stroke-linecap="round"><path d="M4 12h16M4 9v6M20 9v6"/></svg>
+                <span style="flex:1;font-size:12px;color:var(--text-dim)">모서리&lt;5&gt; (길이)</span>
+                <span style="font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums">68.40 mm</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        </sc-if>
+
+        <!-- SECTION PANEL -->
+        <sc-if value="{{ isSection }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;min-height:0;height:100%">
+          <div style="height:38px;flex:none;display:flex;align-items:center;gap:8px;padding:0 8px 0 13px;border-bottom:1px solid var(--border);background:var(--panel-head)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l13-2v11L4 17z" fill="currentColor" fill-opacity="0.14"/><path d="M9 5.2v11"/><line x1="4" y1="17" x2="20" y2="13"/></svg>
+            <span style="font-size:13px;font-weight:700;flex:1">단면</span>
+            <button style="width:24px;height:24px;border:none;background:transparent;color:var(--text-mute);cursor:pointer;display:flex;align-items:center;justify-content:center" style-hover="background:var(--hover);border-radius:4px"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 2v8M5 6l3-3 3 3M3 13h10" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+            <button style="width:24px;height:24px;border:none;background:transparent;color:var(--text-mute);cursor:pointer;display:flex;align-items:center;justify-content:center" style-hover="background:var(--hover);border-radius:4px"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6l5 5 5-5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+            <button onClick="{{ goBase }}" style="width:24px;height:24px;border:none;background:transparent;color:var(--text-mute);cursor:pointer;display:flex;align-items:center;justify-content:center" style-hover="background:#e1473d;color:#fff;border-radius:4px"><svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 2l8 8M10 2l-8 8" stroke-linecap="round"/></svg></button>
+          </div>
+
+          <div class="scry" style="flex:1;overflow-y:auto;padding:14px 14px 16px">
+            <div style="font-size:11px;font-weight:700;color:var(--text-dim);margin-bottom:7px;letter-spacing:.02em">절단면</div>
+            <div style="display:flex;gap:6px;margin-bottom:8px">
+              <button onClick="{{ setXY }}" style="{{ planeXY }}">XY</button>
+              <button onClick="{{ setYZ }}" style="{{ planeYZ }}">YZ</button>
+              <button onClick="{{ setZX }}" style="{{ planeZX }}">ZX</button>
+            </div>
+            <button style="width:100%;display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--win);color:var(--text);cursor:pointer;font-size:12px;margin-bottom:18px" style-hover="background:var(--hover)">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 8l8-3 8 3v8l-8 3-8-3z"/></svg>선택한 면 기준으로 절단
+            </button>
+
+            <div style="font-size:11px;font-weight:700;color:var(--text-dim);margin-bottom:7px;letter-spacing:.02em">옵셋</div>
+            <div style="display:flex;align-items:center;gap:9px;margin-bottom:6px">
+              <input type="range" min="-40" max="40" step="0.5" value="{{ secOffsetNum }}" onInput="{{ onOffset }}" style="flex:1;accent-color:var(--accent);height:4px"/>
+              <div style="display:flex;align-items:center;border:1px solid var(--border);border-radius:6px;background:var(--win);overflow:hidden">
+                <input value="{{ secOffset }}" readonly style="width:54px;border:none;background:transparent;color:var(--text);font-size:12.5px;font-weight:700;text-align:right;padding:6px 2px 6px 8px;font-variant-numeric:tabular-nums;font-family:inherit;outline:none"/>
+                <span style="font-size:11px;color:var(--text-mute);padding:0 8px 0 3px">mm</span>
+              </div>
+            </div>
+            <button onClick="{{ flip }}" style="width:100%;display:flex;align-items:center;justify-content:center;gap:7px;padding:7px;border:1px solid var(--border);border-radius:6px;background:var(--win);color:var(--text);cursor:pointer;font-size:12px;margin-bottom:18px" style-hover="background:var(--hover)">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4l4 4-4 4M20 8H9a5 5 0 0 0-5 5v3"/></svg>방향 반전 (Flip)
+            </button>
+
+            <div style="font-size:11px;font-weight:700;color:var(--text-dim);margin-bottom:7px;letter-spacing:.02em">캡 (Capping)</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:9px 11px;border:1px solid var(--border);border-radius:7px;background:var(--win);margin-bottom:8px">
+              <span style="font-size:12.5px;font-weight:600">단면 채우기</span>
+              <button onClick="{{ toggleCap }}" style="{{ capSwitch }}"><span style="{{ capKnob }}"></span></button>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:9px 11px;border:1px solid var(--border);border-radius:7px;background:var(--win);margin-bottom:18px">
+              <span style="font-size:12.5px;color:var(--text-dim)">캡 색상</span>
+              <div style="display:flex;gap:6px">
+                <span style="width:20px;height:20px;border-radius:4px;background:#5fa3b3;border:2px solid var(--accent);cursor:pointer"></span>
+                <span style="width:20px;height:20px;border-radius:4px;background:#d98a4f;border:1px solid var(--border);cursor:pointer"></span>
+                <span style="width:20px;height:20px;border-radius:4px;background:#8c98a3;border:1px solid var(--border);cursor:pointer"></span>
+                <span style="width:20px;height:20px;border-radius:4px;background:#7e6bd0;border:1px solid var(--border);cursor:pointer"></span>
+              </div>
+            </div>
+
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+              <span style="font-size:11px;font-weight:700;color:var(--text-dim);letter-spacing:.02em">절단 평면</span>
+              <button style="display:flex;align-items:center;gap:4px;border:1px dashed var(--border-strong);border-radius:5px;background:transparent;color:var(--accent);cursor:pointer;font-size:11.5px;font-weight:600;padding:4px 8px" style-hover="background:var(--accent-soft)"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 2v8M2 6h8" stroke-linecap="round"/></svg>평면 추가</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border:1px solid var(--accent);border-radius:6px;background:var(--accent-soft);margin-bottom:5px">
+              <span style="width:9px;height:9px;border-radius:50%;background:var(--accent)"></span>
+              <span style="flex:1;font-size:12px;font-weight:600">평면 1 — YZ</span>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--accent)" stroke-width="1.5"><path d="M2 8s2.2-4 6-4 6 4 6 4-2.2 4-6 4-6-4-6-4z"/><circle cx="8" cy="8" r="1.6"/></svg>
+            </div>
+            <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--win);color:var(--text-mute)">
+              <span style="width:9px;height:9px;border-radius:50%;border:1.5px solid var(--text-mute)"></span>
+              <span style="flex:1;font-size:12px">평면 2 — 사용 안 함</span>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 2l12 12M2 8s2.2-4 6-4M14 8s-2.2 4-6 4"/></svg>
+            </div>
+
+            <div style="margin-top:18px;padding:11px 12px;border:1px solid var(--border);border-radius:7px;background:var(--win)">
+              <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:7px"><span style="color:var(--text-dim)">단면적</span><span style="font-weight:700;font-variant-numeric:tabular-nums">18.42 cm²</span></div>
+              <div style="display:flex;justify-content:space-between;font-size:12.5px"><span style="color:var(--text-dim)">둘레</span><span style="font-weight:700;font-variant-numeric:tabular-nums">214.6 mm</span></div>
+            </div>
+          </div>
+        </div>
+        </sc-if>
+      </div>
+      </sc-if>
+    </div>
+
+    <!-- STATUS BAR -->
+    <div style="height:28px;flex:none;background:var(--chrome);border-top:1px solid var(--border);display:flex;align-items:center;padding:0 12px;gap:16px;font-size:11.5px;color:var(--text-dim)">
+      <span style="display:flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:50%;background:var(--good)"></span>준비됨</span>
+      <span>단위: <b style="color:var(--text)">mm</b></span>
+      <span>정밀도: <b style="color:var(--text)">0.01</b></span>
+      <div style="width:1px;height:14px;background:var(--border)"></div>
+      <span style="font-variant-numeric:tabular-nums">커서  X <b style="color:var(--text)">124.50</b>  Y <b style="color:var(--text)">88.20</b>  Z <b style="color:var(--text)">0.00</b></span>
+      <div style="flex:1"></div>
+      <sc-if value="{{ isMeasure }}" hint-placeholder-val="{{ false }}">
+        <span style="display:flex;align-items:center;gap:6px;color:var(--accent);font-weight:700;font-variant-numeric:tabular-nums"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h16M4 12l4-4M4 12l4 4M20 12l-4-4M20 12l-4 4"/></svg>거리 84.00 mm</span>
+      </sc-if>
+      <sc-if value="{{ isSection }}" hint-placeholder-val="{{ false }}">
+        <span style="display:flex;align-items:center;gap:6px;color:var(--accent);font-weight:700;font-variant-numeric:tabular-nums">YZ 단면 · 옵셋 {{ secOffset }} mm</span>
+      </sc-if>
+      <span>등각 보기</span>
+      <span>100%</span>
+    </div>
+  </div>
+
+  <div style="width:1512px;margin-top:16px;color:#6b7076;font-size:12px;line-height:1.6">
+    상단 <b style="color:#2b2e31">기본 · 측정 · 단면</b> 탭으로 상태 전환 · 우상단에서 <b style="color:#2b2e31">라이트 / 다크</b> 테마 전환. 측정 패널·단면 패널은 우측 도킹 패널로 표시됩니다.
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { screen:'measure', theme:'light', secPlane:'YZ', secOffset:12.5, capping:true };
+
+  metaStyle(active){
+    return active
+      ? {display:'flex',alignItems:'center',padding:'7px 17px',border:'none',borderRadius:'7px',fontSize:'13px',fontWeight:700,cursor:'pointer',fontFamily:'inherit',background:'#2f7fd4',color:'#fff'}
+      : {display:'flex',alignItems:'center',padding:'7px 17px',border:'none',borderRadius:'7px',fontSize:'13px',fontWeight:600,cursor:'pointer',fontFamily:'inherit',background:'transparent',color:'#aeb4bd'};
+  }
+  toolStyle(active){
+    const base={display:'flex',alignItems:'center',gap:'6px',height:'34px',padding:'0 11px',borderRadius:'5px',cursor:'pointer',fontFamily:'inherit'};
+    return active
+      ? {...base,border:'1px solid var(--accent)',background:'var(--accent-soft)',color:'var(--accent)'}
+      : {...base,border:'1px solid transparent',background:'transparent',color:'var(--icon)'};
+  }
+  planeStyle(active){
+    const base={flex:1,height:'34px',borderRadius:'6px',cursor:'pointer',fontSize:'12.5px',fontWeight:700,fontFamily:'inherit'};
+    return active
+      ? {...base,border:'1px solid var(--accent)',background:'var(--accent)',color:'#fff'}
+      : {...base,border:'1px solid var(--border)',background:'var(--win)',color:'var(--text)'};
+  }
+  renderVals(){
+    const s=this.state;
+    const cap=s.capping;
+    return {
+      theme:s.theme,
+      isBase:s.screen==='base', isMeasure:s.screen==='measure', isSection:s.screen==='section',
+      notSection:s.screen!=='section',
+      showRightDock:s.screen!=='base',
+      themeLabel:s.theme==='light'?'라이트':'다크',
+      themeDot:s.theme==='light'?'#f2c14e':'#5b8cd6',
+      secPlane:s.secPlane,
+      secOffset:s.secOffset.toFixed(2),
+      secOffsetNum:s.secOffset,
+      metaBase:this.metaStyle(s.screen==='base'),
+      metaMeasure:this.metaStyle(s.screen==='measure'),
+      metaSection:this.metaStyle(s.screen==='section'),
+      toolMeasure:this.toolStyle(s.screen==='measure'),
+      toolSection:this.toolStyle(s.screen==='section'),
+      planeXY:this.planeStyle(s.secPlane==='XY'),
+      planeYZ:this.planeStyle(s.secPlane==='YZ'),
+      planeZX:this.planeStyle(s.secPlane==='ZX'),
+      capSwitch:{width:'38px',height:'22px',borderRadius:'11px',border:'none',cursor:'pointer',padding:'2px',display:'flex',justifyContent:cap?'flex-end':'flex-start',background:cap?'var(--accent)':'var(--border-strong)',transition:'all .15s'},
+      capKnob:{width:'18px',height:'18px',borderRadius:'50%',background:'#fff',display:'block',boxShadow:'0 1px 2px rgba(0,0,0,.3)'},
+      goBase:()=>this.setState({screen:'base'}),
+      goMeasure:()=>this.setState({screen:'measure'}),
+      goSection:()=>this.setState({screen:'section'}),
+      toggleTheme:()=>this.setState(p=>({theme:p.theme==='light'?'dark':'light'})),
+      setXY:()=>this.setState({secPlane:'XY'}),
+      setYZ:()=>this.setState({secPlane:'YZ'}),
+      setZX:()=>this.setState({secPlane:'ZX'}),
+      onOffset:(e)=>this.setState({secOffset:parseFloat(e.target.value)}),
+      flip:()=>this.setState(p=>({secOffset:-p.secOffset})),
+      toggleCap:()=>this.setState(p=>({capping:!p.capping})),
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -260,9 +260,11 @@ file(
 # OpenCascade
 ##########
 
-if(WIN32)
+if(WIN32 AND NOT VCPKG_TOOLCHAIN)
     # Can't use find_package(OpenCASCADE) as OpenCASCADEConfig.cmake is broken for Windows platform
     # See https://dev.opencascade.org/content/3rdparty-hard-coded-paths-when-building-against-opencascade
+    # Argos: when building with the vcpkg toolchain, OpenCASCADEConfig.cmake is provided/fixed by
+    # vcpkg, so fall through to the find_package(OpenCASCADE) path below instead.
     include(${PROJECT_SOURCE_DIR}/cmake/OpenCascadeWin.cmake)
     if (OpenCASCADE_FOUND)
         # Add OpenCASCADE include directory
@@ -496,6 +498,54 @@ if(Mayo_EnablePch)
 endif()
 
 ##########
+# Target: argos_core (static lib) - Qt-free measurement/section engine
+#   Qt MUST NOT leak in here. It links only MayoCore (base+graphics, Qt-free)
+#   + OpenCASCADE, and re-compiles the Qt-free Mayo measure primitives.
+##########
+
+file(GLOB ArgosCore_SourceFiles ${PROJECT_SOURCE_DIR}/src/argos_core/*.cpp)
+file(GLOB ArgosCore_HeaderFiles ${PROJECT_SOURCE_DIR}/src/argos_core/*.h)
+
+add_library(
+    argos_core STATIC
+    ${ArgosCore_HeaderFiles}
+    ${ArgosCore_SourceFiles}
+    # Reused Qt-free Mayo measurement primitives:
+    ${PROJECT_SOURCE_DIR}/src/measure/measure_tool.cpp
+    ${PROJECT_SOURCE_DIR}/src/measure/measure_tool_brep.cpp
+)
+
+target_include_directories(argos_core PUBLIC ${PROJECT_SOURCE_DIR}/src ${Mayo_IncludeDirectories})
+target_compile_definitions(argos_core PUBLIC ${Mayo_CompileDefinitions})
+target_compile_options(argos_core PRIVATE ${Mayo_CompileOptions})
+# MayoCoreLib = base+graphics+OCCT (Qt-free). MayoIO_LinkLibraries adds the OCCT
+# DataExchange toolkits (TKDESTEP/TKDEIGES/...) needed by the headless loader.
+# Both are OpenCASCADE-only, so argos_core stays Qt-free.
+target_link_libraries(argos_core PUBLIC MayoCoreLib ${MayoIO_LinkLibraries})
+
+##########
+# Target: argos_core_test (Qt-free unit tests for argos_core)
+##########
+
+option(Argos_BuildCoreTests "Build argos_core unit tests" ON)
+if(Argos_BuildCoreTests)
+    add_executable(argos_core_test ${PROJECT_SOURCE_DIR}/tests/argos/test_measure.cpp)
+    target_link_libraries(argos_core_test PRIVATE argos_core)
+    enable_testing()
+    add_test(NAME argos_core_test COMMAND argos_core_test)
+endif()
+
+##########
+# Target: argos-cli (Qt-free headless measurement console tool)
+##########
+
+option(Argos_BuildCli "Build the argos-cli headless measurement tool" ON)
+if(Argos_BuildCli)
+    add_executable(argos-cli ${PROJECT_SOURCE_DIR}/src/argos_cli/main.cpp)
+    target_link_libraries(argos-cli PRIVATE argos_core)
+endif()
+
+##########
 # Target: MayoApp
 ##########
 
@@ -507,6 +557,7 @@ set(MayoApp_LinkLibraries)
 file(
     GLOB MayoApp_HeaderFiles
     ${PROJECT_SOURCE_DIR}/src/app/*.h
+    ${PROJECT_SOURCE_DIR}/src/argos_core/*.h
     ${PROJECT_SOURCE_DIR}/src/measure/*.h
     ${PROJECT_SOURCE_DIR}/src/qtbackend/*.h
     ${PROJECT_SOURCE_DIR}/src/qtcommon/*.h
@@ -515,6 +566,7 @@ file(
 file(
     GLOB MayoApp_SourceFiles
     ${PROJECT_SOURCE_DIR}/src/app/*.cpp
+    ${PROJECT_SOURCE_DIR}/src/argos_core/*.cpp
     ${PROJECT_SOURCE_DIR}/src/measure/*.cpp
     ${PROJECT_SOURCE_DIR}/src/qtbackend/*.cpp
     ${PROJECT_SOURCE_DIR}/src/qtcommon/*.cpp

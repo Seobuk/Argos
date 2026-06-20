@@ -4,3 +4,10 @@ build-*
 custom.pri
 env.pri
 cmake/CustomSteps.cmake
+
+# Argos: build / packaging output and vendored binaries (never commit)
+/build/
+/dist/
+/resources/fonts/
+vcpkg_installed/
+*.zip

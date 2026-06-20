@@ -14,6 +14,9 @@
 #include <memory>
 #include <vector>
 
+class QCheckBox;
+class QListWidget;
+
 namespace Mayo {
 
 class GuiDocument;
@@ -48,10 +51,17 @@ private:
     void onGraphicsSelectionChanged();
     void onDocumentEntityAdded(TreeNodeId entityNodeId);
 
+    // Argos: (re)compute the measurement for the current selection set, applying
+    // the Show-XYZ / Point-to-Point options. addToHistory appends the result to
+    // the measurement-history list (only on a genuine selection change).
+    void recompute(bool addToHistory);
+
     void updateMessagePanel();
 
     using IMeasureDisplayPtr = std::unique_ptr<IMeasureDisplay>;
     void eraseMeasureDisplay(const IMeasureDisplay* measure);
+    // Argos: SolidWorks-style set-based measure -> erase all current displays
+    void clearAllMeasureDisplays();
 
     // Provides link between GraphicsOwner and IMeasureDisplay object
     struct GraphicsOwner_MeasureDisplay {
@@ -70,6 +80,12 @@ private:
     std::vector<GraphicsOwner_MeasureDisplay> m_vecLinkGfxOwnerMeasure;
     IMeasureTool* m_tool = nullptr;
     QString m_errorMessage;
+    QString m_resultText;   // Argos: formatted readout of the current selection set
+
+    // Argos SolidWorks-style controls (created in code, see constructor)
+    QCheckBox* m_checkShowXyz = nullptr;
+    QCheckBox* m_checkPointToPoint = nullptr;
+    QListWidget* m_historyList = nullptr;
     SignalConnectionHandle m_connGraphicsSelectionChanged;
     SignalConnectionHandle m_connDocumentEntityAdded;
 };
