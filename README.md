@@ -1,130 +1,91 @@
 <div align="center">
-  
-[![Windows CI](https://github.com/fougue/mayo/actions/workflows/ci_windows.yml/badge.svg?branch=develop)](https://github.com/fougue/mayo/actions/workflows/ci_windows.yml)
-[![Linux CI](https://github.com/fougue/mayo/actions/workflows/ci_linux_ubuntu.yml/badge.svg?branch=develop)](https://github.com/fougue/mayo/actions/workflows/ci_linux_ubuntu.yml)
-[![macOS CI](https://github.com/fougue/mayo/actions/workflows/ci_macos.yml/badge.svg?branch=develop)](https://github.com/fougue/mayo/actions/workflows/ci_macos.yml)
-<br>
-[![Downloads](https://img.shields.io/github/downloads/fougue/mayo/total.svg)](https://github.com/fougue/mayo/releases)
-[![Version](https://img.shields.io/badge/version-v0.9.0-blue.svg?style=flat)](https://github.com/fougue/mayo/releases)
-  
+
+<img src="images/appicon_256.png" width="116" alt="Argos"/>
+
+# Argos
+
+**Windows 네이티브 3D CAD 측정 뷰어** · STEP · IGES · STL
+
+SolidWorks 스타일 **측정**·**단면** 도구와 Qt 비의존 측정 엔진을 갖춘
+[Mayo](https://github.com/fougue/mayo) 포크
+
+**[한국어](README.md)** · [English](README.en.md)
+
 </div>
 
-<div align="center">
-  <img src="images/appicon_256.png" alt="Logo" width="128px" align="center" />
-  <p></p>
-  <p align="center"><strong>Mayo</strong> the opensource 3D CAD viewer and converter</9>
-  <p></p>
-  <img src="doc/screencast_1.gif"/>
-</div>
+---
 
-## :eyeglasses: Overview
-- **Convert 3D files** <br/>
-Mayo can read/write 3D files from/to STEP, IGES, STL and many other [CAD formats](https://github.com/fougue/mayo/wiki/Supported-formats)
+![Argos](docs/images/hero.png)
 
-- **Visualize 3D files** <br/>
-Mayo 3D viewer supports clip planes, exploding of assemblies, measurement of shapes, show/hide parts, ...
+## ✨ 주요 기능
 
-- **Cross platform** <br/>
-Mayo runs on Windows, Linux and macOS
+Argos는 Mayo의 탄탄한 뷰어 기능은 그대로 두고, 그 위에 **측정 · 단면 · 자동화 엔진 · 한국어 UI**를 더했습니다.
 
-- **Solid foundations** <br/>
-Mayo is developed in modern C++ with [Qt](https://www.qt.io) and [OpenCascade](https://dev.opencascade.org)
+### 📐 SolidWorks 스타일 측정
+도구를 켜고 **점·모서리·면을 모드 전환 없이 클릭**하면 측정 종류가 자동 판별됩니다.
+형상 위에 **마우스만 올려도(클릭 0번)** 길이·면적·지름이 실시간으로 표시됩니다.
 
-For more details have a look at this fine review [Introducing Mayo](https://librearts.org/2023/01/introducing-mayo-free-cad-files-viewer) by Libre Arts<br/>
-There's also a complete [video](https://www.youtube.com/watch?v=qg6IamnlfxE&ab_channel=LibreArts) on YouTube
+- 선택 항목 색상 칩, **대형 값 카드**, 색깔 ΔX/ΔY/ΔZ 그리드, 보조 정보(반경·중심·둘레…)
+- 값 복사 / JSON 복사 / 선택 해제, 측정 이력, 단축키(`M`·`Esc`·`Ctrl+C`)
 
+![측정](docs/images/measure.png)
 
-## :zap: Features
-- **3D clip planes** with configurable capping
+### ✂️ 단면(Section) 도구
+표준 평면(XY / YZ / ZX) 기준으로 자르고, 오프셋 슬라이더·방향 반전·**캡(단면 채우기)**·캡 색상을 지원합니다.
+단면 **둘레·절단 모서리**는 Qt 비의존 엔진이 계산합니다.
 
-- **3D exploding of the model tree** allowing better exploration of complex designs
+![단면](docs/images/section.png)
 
-- **3D measure tools** for circles, angles, lengths, areas, bounding box, ...
+### ⚙️ `argos_core` — Qt 비의존 엔진 + CLI
+측정/단면/로더를 **Qt가 전혀 없는** OpenCASCADE 전용 계층으로 분리했습니다(JSON 반환).
+같은 엔진을 GUI · CLI · (향후) MCP가 공유 → AI/자동화가 Argos를 구동할 수 있습니다.
 
-- **3D view cube** providing intuitive camera manipulation
+```
+argos_core (Qt 없음, OpenCASCADE only)
+   ├── Argos GUI (Qt)
+   └── argos-cli  → JSON
+```
 
-- **Quick access to CAD files** recently open thanks to thumbnails in the [Home page](https://github.com/fougue/mayo/blob/develop/doc/screenshot_5.png)
+## ⬇️ 다운로드
 
-- **Toggle item visibility** within the Model tree(use checkbox)
+최신 빌드는 **[Releases](https://github.com/Seobuk/Argos/releases/latest)** 에서 받을 수 있습니다.
+`Argos-win64.zip` 의 압축을 풀고 **`Argos.exe`** 를 실행하세요. (Windows 10/11 64비트)
 
-- **Customizable mesh precision** for BREP shapes, affecting visualization quality and conversion into mesh formats
+> 비공개 저장소이므로 다운로드에는 저장소 접근 권한이 필요합니다.
 
-- **Convert files** to multiple CAD formats from [command-line interface](https://github.com/fougue/mayo/blob/develop/doc/screencast_cli.gif):computer:
+## 🖥 명령줄 도구 (`argos-cli`)
 
-## :floppy_disk: Supported formats
-  Format  |  Import            |  Export            | Notes
-----------|--------------------|--------------------|------------------
-STEP      | :white_check_mark: | :white_check_mark: | AP203, 214, 242
-IGES      | :white_check_mark: | :white_check_mark: | v5.3
-BREP      | :white_check_mark: | :white_check_mark: | OpenCascade format
-DXF       | :white_check_mark: | :x:                |
-OBJ       | :white_check_mark: | :white_check_mark: |
-glTF      | :white_check_mark: | :white_check_mark: | 1.0, 2.0 and GLB
-VRML      | :white_check_mark: | :white_check_mark: | v2.0 UTF8
-STL       | :white_check_mark: | :white_check_mark: | ASCII/binary
-AMF       | :white_check_mark: | :white_check_mark: | v1.2 Text/ZIP(export)
-PLY       | :white_check_mark: | :white_check_mark: | ASCII/binary
-OFF       | :white_check_mark: | :white_check_mark: |
-3MF       | :white_check_mark: | :x:                |
-3DS       | :white_check_mark: | :x:                |
-FBX       | :white_check_mark: | :x:                | 
-Collada   | :white_check_mark: | :x:                |
-X3D       | :white_check_mark: | :x:                |
-X(DirectX)| :white_check_mark: | :x:                |
-Image     | :x:                | :white_check_mark: | PNG, JPEG, ...
+헤드리스로 측정·단면을 수행하고 결과를 **JSON으로 표준출력**합니다.
 
-See also this dedicated [wikipage](https://github.com/fougue/mayo/wiki/Supported-formats) for more details
+```bash
+# 두 꼭짓점 사이 거리 (dX/dY/dZ 포함)
+argos-cli measure part.step --vertex 1 --vertex 7
 
-## :mag: 3D viewer operations
+# XY 평면, z = 5 단면
+argos-cli section part.step --plane xy --offset 5
 
-  Operation    |  Mouse/Keyboard controls
----------------|--------------------------
-Rotate         | mouseLeft  + move
-Pan            | mouseRight + move
-Zoom           | mouseLeft  + mouseRight + move
-Zoom +/-       | mouseWheel(scroll)
-Window zoom    | CTRL + mouseLeft + move
-Instant zoom   | spaceBar
-Select Object  | mouseLeft click
-Select Objects | SHIFT + mouseLeft clicks
+# 모델 요약
+argos-cli info part.step
+```
 
-Mayo supports also multiple 3D viewer navigation styles to mimic common CAD applications(CATIA, SOLIDWORKS, ...)
+## 🔨 빌드 (Windows)
 
-## :package: Install
-Release packages are available for Windows and Linux on the [Releases](https://github.com/fougue/mayo/releases) page.  
+- Visual Studio 2022 빌드 도구(C++) · vcpkg(OpenCASCADE **7.9.0** 고정) · Qt 6
 
-Alternatives for Windows:
-- [Winget](https://winstall.app/apps/Fougue.Mayo)
-````
-winget install --id Fougue.Mayo
-````  
-- [Scoop](https://scoop.sh/#/apps?s=0&d=1&o=true&q=mayo)
-````
-scoop bucket add extras
-scoop install extras/mayo
-````
+```powershell
+powershell -File scripts/argos-build.ps1 -Tests
+powershell -File scripts/argos-package.ps1   # dist/Argos-win64.zip 생성
+```
 
-## :hammer: How to build
-[Instructions for Windows](https://github.com/fougue/mayo/wiki/Build-instructions-for-Windows)  
-[Instructions for Linux](https://github.com/fougue/mayo/wiki/Build-instructions-for-Linux)  
-[Instructions for macOS](https://github.com/fougue/mayo/wiki/Build-instructions-for-macOS)
+결과물: `build/Release/` 의 `mayo.exe`(→ 배포 시 `Argos.exe`), `argos-cli.exe`, `argos_core_test.exe`.
 
-## :clapper: Gallery
+## 📚 문서
 
-_Easy to use command-line utility for batch conversion of CAD files_
-<img src="doc/screencast_cli.gif"/> 
+- [Argos vs Mayo 차이점](docs/argos-vs-mayo.md) — 기능별 비교(완료/부분/예정)
+- [제품 스펙](docs/argos-spec.md)
+- [UI 디자인 핸드오프](docs/ui-design/)
 
-_Import of glTF file with textures_
-<img src="doc/screenshot_2.png"/>
+## 📄 라이선스
 
-_Import of STEP file with many parts_
-<img src="doc/screenshot_3.png"/>
-
-_Import of PLY file defining point cloud_
-<img src="doc/screenshot_6.png"/>
-
-_Options dialog with import/export configuration per CAD format_
-<img src="doc/screenshot_4.png"/>
-
-_Home page with quick access to recent files_
-<img src="doc/screenshot_5.png"/>
+Mayo의 **BSD-2-Clause** 라이선스를 그대로 따릅니다([LICENSE.txt](LICENSE.txt)).
+Argos는 [fougue/mayo](https://github.com/fougue/mayo)의 포크입니다.

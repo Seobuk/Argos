@@ -68,7 +68,7 @@ if (Test-Path $fontSrc) {
 }
 
 # Docs + license notices (keep Mayo's permissive license).
-foreach ($doc in @('README-Argos.md','LICENSE.txt')) {
+foreach ($doc in @('README.md','README.en.md','LICENSE.txt')) {
     $src = Join-Path $repo $doc
     if (Test-Path $src) { Copy-Item $src $dist -Force }
 }
