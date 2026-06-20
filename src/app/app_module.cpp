@@ -124,6 +124,7 @@ const Enumeration& AppModule::languages()
         { 0, AppModule::textId("en") },
         { 1, AppModule::textId("fr") },
         { 2, AppModule::textId("zh") },
+        { 3, AppModule::textId("ko") },   // Argos: Korean
     };
     return langs;
 }
@@ -139,7 +140,8 @@ QString AppModule::languageCode() const
             return QString::fromStdString(strCode);
     }
 
-    std::string_view langDefault = langs.findNameByValue(0);
+    // Argos: default UI language is Korean (value 3) when no user setting exists.
+    std::string_view langDefault = langs.findNameByValue(3);
     return QString::fromUtf8(langDefault.data(), static_cast<int>(langDefault.size()));
 }
 

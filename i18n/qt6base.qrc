@@ -3,5 +3,6 @@
 <file alias="qtbase_en.qm">qt6base_en.qm</file>
 <file alias="qtbase_fr.qm">qt6base_fr.qm</file>
 <file alias="qtbase_zh.qm">qt6base_zh.qm</file>
+<file alias="qtbase_ko.qm">qt6base_ko.qm</file>
 </qresource>
 </RCC>
