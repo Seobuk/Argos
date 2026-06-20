@@ -26,12 +26,23 @@ KO_FONT = "Malgun Gothic"  # Korean-capable font for PowerPoint rendering
 # in-plane dims = (horizontal axis, vertical axis) of the bounding box that the
 # orthographic view measures, used to draw dimension annotations on the image.
 # None means no dimension annotation (e.g. the isometric view).
+# Bounding-box axis -> Korean dimension name (가로/세로/높이).
+AXIS_KOR = {"x": "가로(X)", "y": "세로(Y)", "z": "높이(Z)"}
+
+# Views to render. (name, Z-up camera vector, label, in-plane dims (h,v) or None)
+# Four isometric corners give a "여러 각도" gallery (turntable-like); front/top/
+# side are the orthographic 삼면도 used for the dimensioned drawing. Top is key
+# for flat parts (a PCB only "reads" from above) and shows the X-Y footprint.
 CAMERA_VIEWS = [
-    ("iso",   "1, -1, 1", "등각투영 (ISO)", None),
-    ("front", "0, -1, 0", "앞면 (Front)",  ("x", "z")),
-    ("back",  "0, 1, 0",  "뒷면 (Back)",   ("x", "z")),
-    ("right", "1, 0, 0",  "옆면 (Side)",   ("y", "z")),
+    ("iso",   "1, -1, 1",  "등각 (앞·우·위)", None),
+    ("iso2",  "-1, -1, 1", "등각 (앞·좌·위)", None),
+    ("iso3",  "-1, 1, 1",  "등각 (뒤·좌·위)", None),
+    ("iso4",  "1, 1, 1",   "등각 (뒤·우·위)", None),
+    ("front", "0, -1, 0",  "정면도 (앞)",     ("x", "z")),
+    ("top",   "0, 0, 1",   "평면도 (위)",     ("x", "y")),
+    ("right", "1, 0, 0",   "측면도 (옆)",     ("y", "z")),
 ]
+ISO_VIEWS = ["iso", "iso2", "iso3", "iso4"]
 
 
 def find_cli(explicit):
@@ -209,7 +220,7 @@ def annotate_image(src, dst, hval, vval, hlabel, vlabel):
         d.line([(x0, y1 + gap), (x0, ydim + gap)], fill=GREY, width=ew)   # extension lines
         d.line([(x1, y1 + gap), (x1, ydim + gap)], fill=GREY, width=ew)
         _arrow_h(d, x0, x1, ydim, RED, a=ah, w=aw)
-        s = f"가로 {hlabel} = {fnum(hval, 1)} mm"
+        s = f"{hlabel} = {fnum(hval, 1)} mm"
         tw, th = text_w(s)
         tx = max(2, (x0 + x1) // 2 - tw // 2)
         d.rectangle([tx - 8, ydim + gap, tx + tw + 8, ydim + gap + th + 12], fill=(255, 255, 255))
@@ -221,7 +232,7 @@ def annotate_image(src, dst, hval, vval, hlabel, vlabel):
         d.line([(x0 + gap // 2, y0), (xdim - gap, y0)], fill=GREY, width=ew)
         d.line([(x0 + gap // 2, y1), (xdim - gap, y1)], fill=GREY, width=ew)
         _arrow_v(d, xdim, y0, y1, RED, a=ah, w=aw)
-        s = f"세로 {vlabel} = {fnum(vval, 1)} mm"
+        s = f"{vlabel} = {fnum(vval, 1)} mm"
         tw, th = text_w(s)
         lbl = Image.new("RGBA", (tw + 16, th + 16), (255, 255, 255, 235))
         ld = ImageDraw.Draw(lbl)
@@ -251,7 +262,7 @@ def annotate_views(images, bbox, out_dir):
         hkey, vkey = dims
         dst = os.path.join(out_dir, f"view_{name}_dim.png")
         if annotate_image(raw, dst, bbox.get(hkey), bbox.get(vkey),
-                          hkey.upper(), vkey.upper()):
+                          AXIS_KOR.get(hkey, hkey.upper()), AXIS_KOR.get(vkey, vkey.upper())):
             result[name] = dst
             print(f"[argos_report] annotated {name} -> {os.path.basename(dst)}")
     return result
@@ -292,6 +303,9 @@ def main():
     ap.add_argument("--reuse", action="store_true",
                     help="reuse existing digest.json + view_*.png in the output folder "
                          "(fast rebuild of the PPTX without re-measuring/re-rendering)")
+    ap.add_argument("--with-mass", action="store_true",
+                    help="also include the mass / inertia / URDF slides (humanoid link "
+                         "dynamics). Off by default: the report focuses on size + photos.")
     a = ap.parse_args()
 
     step = os.path.abspath(a.step)
@@ -311,12 +325,14 @@ def main():
     digest_path = os.path.join(out_dir, "digest.json")
     urdf_path = os.path.join(out_dir, "inertial.urdf.xml")
     dg = None
+    urdf_txt = ""
     if a.reuse and os.path.isfile(digest_path):
         try:
             dg_txt = open(digest_path, encoding="utf-8").read()
             dg = json.loads(dg_txt)
-            urdf_txt = open(urdf_path, encoding="utf-8").read() if os.path.isfile(urdf_path) else ""
-            print("[argos_report] reusing existing digest.json / inertial.urdf.xml")
+            if os.path.isfile(urdf_path):
+                urdf_txt = open(urdf_path, encoding="utf-8").read()
+            print("[argos_report] reusing existing digest.json")
         except Exception:
             dg = None
     if dg is None:
@@ -330,11 +346,13 @@ def main():
         if not dg.get("ok"):
             print("[argos_report] digest failed:", dg.get("error"))
             sys.exit(1)
-        urdf_txt, _ = run_cli(cli, ["props", step, "--density", str(a.density), "--urdf"])
         with open(digest_path, "w", encoding="utf-8") as f:
             f.write(dg_txt)
-        with open(urdf_path, "w", encoding="utf-8") as f:
-            f.write(urdf_txt)
+        # Mass / inertia / URDF are only computed when explicitly requested.
+        if a.with_mass:
+            urdf_txt, _ = run_cli(cli, ["props", step, "--density", str(a.density), "--urdf"])
+            with open(urdf_path, "w", encoding="utf-8") as f:
+                f.write(urdf_txt)
 
     images = {}
     if not a.no_images:
@@ -342,12 +360,12 @@ def main():
         images = annotate_views(images, dg.get("bboxSize"), out_dir)
 
     pptx_path = os.path.join(out_dir, stem + "_report.pptx")
-    build_pptx(dg, urdf_txt, step, a.density, a.material, pptx_path, images)
+    build_pptx(dg, urdf_txt, step, a.density, a.material, pptx_path, images, a.with_mass)
     print(f"[argos_report] PPTX  = {pptx_path}")
     print("[argos_report] done.")
 
 
-def build_pptx(dg, urdf, step, density, material, path, images=None):
+def build_pptx(dg, urdf, step, density, material, path, images=None, with_mass=False):
     from pptx import Presentation
     from pptx.util import Inches, Pt, Emu
     from pptx.dml.color import RGBColor
@@ -449,76 +467,64 @@ def build_pptx(dg, urdf, step, density, material, path, images=None):
     fname = os.path.basename(step)
     mat_label = material or ("강철(steel)" if abs(density - 7850.0) < 1 else f"{density:g} kg/m³")
 
-    # ---- Slide 1: title ----
+    gx, gy, gz = bb.get("x"), bb.get("y"), bb.get("z")
+
+    # ---- Slide 1: title (with the part image) ----
     s = prs.slides.add_slide(blank)
     bg = s.shapes.add_shape(1, 0, 0, SW, SH)
     bg.fill.solid(); bg.fill.fore_color.rgb = RGBColor(0x15, 0x31, 0x52); bg.line.fill.background()
-    textbox(s, Inches(0.8), Inches(2.4), Inches(11.7), Inches(1.2),
+    textbox(s, Inches(0.8), Inches(0.95), Inches(11.7), Inches(1.2),
             "Argos 측정 보고서", size=40, bold=True, color=WHITE)
-    textbox(s, Inches(0.85), Inches(3.7), Inches(11.7), Inches(2.0),
-            f"파일: {fname}\n재료/밀도: {mat_label}\n생성: Argos (argos-cli digest/props)",
+    sub = f"파일: {fname}"
+    if None not in (gx, gy, gz):
+        sub += f"\n크기: 가로 {fnum(gx,1)} × 세로 {fnum(gy,1)} × 높이 {fnum(gz,1)} mm"
+    textbox(s, Inches(0.85), Inches(2.15), Inches(11.7), Inches(1.2), sub,
             size=16, color=RGBColor(0xCF, 0xDD, 0xEE))
+    place_image(s, "iso", Inches(3.4), Inches(3.45), Inches(6.5), Inches(3.7))
 
-    # ---- Slide 2: overview / dimensions (+ iso render) ----
+    # ---- Slide 2: dimensions (가로/세로/높이) + part image ----
     s = prs.slides.add_slide(blank)
-    title_bar(s, "개요 · 주요 치수", fname)
+    title_bar(s, "주요 치수 — 가로 · 세로 · 높이", fname)
     rows = [["항목", "값"]]
-    if bb:
-        rows.append(["전체 치수 (L×W×H)",
-                     f"{fnum(bb.get('x'))} × {fnum(bb.get('y'))} × {fnum(bb.get('z'))} mm"])
+    if None not in (gx, gy, gz):
+        rows.append(["가로 (X)", f"{fnum(gx)} mm"])
+        rows.append(["세로 (Y)", f"{fnum(gy)} mm"])
+        rows.append(["높이 (Z)", f"{fnum(gz)} mm"])
     if vol_mm3 is not None:
-        rows.append(["부피", f"{fnum(vol_mm3)} mm³  ({fnum(float(vol_mm3)/1000.0)} cm³)"])
+        rows.append(["부피", f"{fnum(float(vol_mm3)/1000.0)} cm³"])
     if mass.get("area_mm2") is not None:
         rows.append(["표면적", f"{fnum(mass.get('area_mm2'))} mm²"])
     rows.append(["솔리드 / 면 / 모서리",
                  f"{counts.get('solids','-')} / {counts.get('faces','-')} / {counts.get('edges','-')}"])
-    has_iso = "iso" in images
-    table_w = Inches(6.7) if has_iso else Inches(11.9)
-    add_table(s, rows, Inches(0.55), Inches(1.45), table_w, [0.46, 0.54])
-    place_image(s, "iso", Inches(7.45), Inches(1.55), Inches(5.4), Inches(5.2),
+    add_table(s, rows, Inches(0.55), Inches(1.5), Inches(6.4), [0.5, 0.5], fontsize=15)
+    place_image(s, "iso", Inches(7.35), Inches(1.55), Inches(5.5), Inches(5.2),
                 caption="등각 투상도 (Argos 3D 뷰)")
 
-    # ---- Slide 2b: all views on one page (front / back / side / iso) with the
-    #      width & height dimensions drawn right on each orthographic image ----
-    if any(k in images for k in ("front", "back", "right", "iso")):
+    # ---- Slide 3: dimensioned drawing (정면·평면·측면 + 등각) ----
+    if any(k in images for k in ("front", "top", "right", "iso")):
         s = prs.slides.add_slide(blank)
-        title_bar(s, "전체 뷰 — 앞 · 뒤 · 옆 · 등각", f"{fname}  ·  치수(가로/세로)가 이미지에 표시됨")
+        title_bar(s, "치수 도면 — 정면 · 평면 · 측면 · 등각",
+                  f"{fname}  ·  가로/세로/높이가 이미지에 표시됨")
         grid = [("front", Inches(0.45), Inches(1.30)),
-                ("back",  Inches(6.95), Inches(1.30)),
+                ("top",   Inches(6.95), Inches(1.30)),
                 ("right", Inches(0.45), Inches(4.45)),
                 ("iso",   Inches(6.95), Inches(4.45))]
         for name, l, t in grid:
             place_image(s, name, l, t, Inches(5.9), Inches(2.55),
                         caption=captions.get(name, name))
 
-    # ---- Slide 3: mass / inertia ----
-    s = prs.slides.add_slide(blank)
-    title_bar(s, "질량 특성 (휴머노이드 링크 동역학)", f"{fname}  ·  {mat_label}")
-    if mass.get("ok"):
-        com = mass.get("com_mm") or {}
-        it = mass.get("inertia_com_kg_m2") or {}
-        pm = mass.get("principal_moments_kg_m2") or []
-        m_rows = [["항목", "값"],
-                  ["질량", f"{fnum(mass.get('mass_kg'), 4)} kg  ({fnum(float(mass.get('mass_kg',0))*1000.0)} g)"],
-                  ["무게중심 COM (mm)",
-                   f"({fnum(com.get('x'),3)}, {fnum(com.get('y'),3)}, {fnum(com.get('z'),3)})"],
-                  ["주관성모멘트 (kg·m²)",
-                   f"{fsci(pm[0]) if len(pm)>0 else '-'},  {fsci(pm[1]) if len(pm)>1 else '-'},  {fsci(pm[2]) if len(pm)>2 else '-'}"]]
-        add_table(s, m_rows, Inches(0.7), Inches(1.35), Inches(11.9), [0.34, 0.66])
-        textbox(s, Inches(0.7), Inches(3.55), Inches(6), Inches(0.4),
-                "관성텐서 (COM 기준, kg·m²)", size=14, bold=True, color=ACCENT)
-        I = [["", "x", "y", "z"],
-             ["x", fsci(it.get("ixx")), fsci(it.get("ixy")), fsci(it.get("ixz"))],
-             ["y", fsci(it.get("ixy")), fsci(it.get("iyy")), fsci(it.get("iyz"))],
-             ["z", fsci(it.get("ixz")), fsci(it.get("iyz")), fsci(it.get("izz"))]]
-        add_table(s, I, Inches(0.7), Inches(4.0), Inches(8.2), [0.16, 0.28, 0.28, 0.28], fontsize=12)
-    else:
-        textbox(s, Inches(0.7), Inches(1.6), Inches(11), Inches(1),
-                "질량 특성을 계산할 수 없습니다 (솔리드가 아님): " + str(mass.get("error", "")),
-                size=16, color=DIM)
+    # ---- Slide 4: multi-angle photo gallery (여러 각도) ----
+    iso_present = [v for v in ISO_VIEWS if v in images]
+    if len(iso_present) >= 2:
+        s = prs.slides.add_slide(blank)
+        title_bar(s, "여러 각도 — 등각 뷰", fname)
+        cells = [(Inches(0.45), Inches(1.30)), (Inches(6.95), Inches(1.30)),
+                 (Inches(0.45), Inches(4.45)), (Inches(6.95), Inches(4.45))]
+        for name, (l, t) in zip(iso_present[:4], cells):
+            place_image(s, name, l, t, Inches(5.9), Inches(2.55),
+                        caption=captions.get(name, name))
 
-    # ---- Slide 4: diameters (largest first; paginated into columns when many,
-    #      so a part with hundreds of cylinders doesn't overflow the slide) ----
+    # ---- Slide 5: diameters (largest first; paginated when many) ----
     s = prs.slides.add_slide(blank)
     PER_COL = 14
     MAX_COLS = 2
@@ -527,7 +533,7 @@ def build_pptx(dg, urdf, step, density, material, path, images=None):
         note = f"총 {len(diam)}개"
     else:
         note = f"총 {len(diam)}개 중 상위 {len(shown)}개 (전체는 digest.json)"
-    title_bar(s, "주요 지름 (원통면, 큰 것부터)", f"{fname}  ·  {note}" if diam else fname)
+    title_bar(s, "주요 지름 (원통/구멍, 큰 것부터)", f"{fname}  ·  {note}" if diam else fname)
     if diam:
         ncols = max(1, min(MAX_COLS, (len(shown) + PER_COL - 1) // PER_COL))
         col_w = Inches(3.0)
@@ -539,17 +545,44 @@ def build_pptx(dg, urdf, step, density, material, path, images=None):
                 rows.append([ci * PER_COL + k + 1, fnum(d, 3), fnum(float(d) / 2.0, 3)])
             add_table(s, rows, Inches(0.5) + ci * (col_w + gap), Inches(1.4), col_w,
                       [0.22, 0.42, 0.36], fontsize=11)
-        place_image(s, "iso", Inches(7.05), Inches(1.55), Inches(5.8), Inches(5.2),
-                    caption="원통면 위치 (등각 투상도)")
+        place_image(s, "top", Inches(7.05), Inches(1.55), Inches(5.8), Inches(5.2),
+                    caption="원통/구멍 위치 (평면도)")
     else:
         textbox(s, Inches(0.7), Inches(1.6), Inches(11), Inches(1),
                 "원통면이 감지되지 않았습니다.", size=16, color=DIM)
 
-    # ---- Slide 5: URDF ----
-    s = prs.slides.add_slide(blank)
-    title_bar(s, "URDF <inertial> (로봇 링크)", fname)
-    textbox(s, Inches(0.6), Inches(1.35), Inches(12.1), Inches(5.5), urdf.strip(),
-            size=14, mono=True, color=INK)
+    # ---- Optional: mass / inertia + URDF (humanoid link dynamics) ----
+    if with_mass:
+        s = prs.slides.add_slide(blank)
+        title_bar(s, "질량 특성 (휴머노이드 링크 동역학)", f"{fname}  ·  {mat_label}")
+        if mass.get("ok"):
+            com = mass.get("com_mm") or {}
+            it = mass.get("inertia_com_kg_m2") or {}
+            pm = mass.get("principal_moments_kg_m2") or []
+            m_rows = [["항목", "값"],
+                      ["질량", f"{fnum(mass.get('mass_kg'), 4)} kg  ({fnum(float(mass.get('mass_kg',0))*1000.0)} g)"],
+                      ["무게중심 COM (mm)",
+                       f"({fnum(com.get('x'),3)}, {fnum(com.get('y'),3)}, {fnum(com.get('z'),3)})"],
+                      ["주관성모멘트 (kg·m²)",
+                       f"{fsci(pm[0]) if len(pm)>0 else '-'},  {fsci(pm[1]) if len(pm)>1 else '-'},  {fsci(pm[2]) if len(pm)>2 else '-'}"]]
+            add_table(s, m_rows, Inches(0.7), Inches(1.35), Inches(11.9), [0.34, 0.66])
+            textbox(s, Inches(0.7), Inches(3.55), Inches(6), Inches(0.4),
+                    "관성텐서 (COM 기준, kg·m²)", size=14, bold=True, color=ACCENT)
+            I = [["", "x", "y", "z"],
+                 ["x", fsci(it.get("ixx")), fsci(it.get("ixy")), fsci(it.get("ixz"))],
+                 ["y", fsci(it.get("ixy")), fsci(it.get("iyy")), fsci(it.get("iyz"))],
+                 ["z", fsci(it.get("ixz")), fsci(it.get("iyz")), fsci(it.get("izz"))]]
+            add_table(s, I, Inches(0.7), Inches(4.0), Inches(8.2), [0.16, 0.28, 0.28, 0.28], fontsize=12)
+        else:
+            textbox(s, Inches(0.7), Inches(1.6), Inches(11), Inches(1),
+                    "질량 특성을 계산할 수 없습니다 (솔리드가 아님): " + str(mass.get("error", "")),
+                    size=16, color=DIM)
+
+        if urdf and urdf.strip():
+            s = prs.slides.add_slide(blank)
+            title_bar(s, "URDF <inertial> (로봇 링크)", fname)
+            textbox(s, Inches(0.6), Inches(1.35), Inches(12.1), Inches(5.5), urdf.strip(),
+                    size=14, mono=True, color=INK)
 
     prs.save(path)
 
