@@ -21,14 +21,16 @@ import sys
 
 KO_FONT = "Malgun Gothic"  # Korean-capable font for PowerPoint rendering
 
-# Offscreen 3D views to render (name -> Z-up camera projection vector, caption).
-# Captions explain which bounding-box dimensions each orthographic view shows, so
-# the reader can see *where* a measured length comes from.
+# Offscreen 3D views to render. Each entry:
+#   (name, Z-up camera projection vector, Korean label, in-plane dims)
+# in-plane dims = (horizontal axis, vertical axis) of the bounding box that the
+# orthographic view measures, used to draw dimension annotations on the image.
+# None means no dimension annotation (e.g. the isometric view).
 CAMERA_VIEWS = [
-    ("iso",   "1, -1, 1", "등각 투상도"),
-    ("front", "0, -1, 0", "정면도 — 폭(X) × 높이(Z)"),
-    ("top",   "0, 0, 1",  "윗면도 — 길이(X) × 폭(Y)"),
-    ("right", "1, 0, 0",  "측면도 — 폭(Y) × 높이(Z)"),
+    ("iso",   "1, -1, 1", "등각투영 (ISO)", None),
+    ("front", "0, -1, 0", "앞면 (Front)",  ("x", "z")),
+    ("back",  "0, 1, 0",  "뒷면 (Back)",   ("x", "z")),
+    ("right", "1, 0, 0",  "옆면 (Side)",   ("y", "z")),
 ]
 
 
@@ -71,25 +73,28 @@ def render_views(conv, step, out_dir, width=1600, height=1200, reuse=False):
     With reuse=True, an existing non-empty view_<name>.png is kept as-is (skips
     mayo-conv) so the PPTX can be rebuilt quickly without re-rendering."""
     images = {}
-    if reuse:
-        for name, _cam, _caption in CAMERA_VIEWS:
-            png = os.path.join(out_dir, f"view_{name}.png")
-            if os.path.isfile(png) and os.path.getsize(png) > 0:
-                images[name] = png
-        if images:
-            print(f"[argos_report] reusing {len(images)} existing render(s)")
-            return images
+    todo = []
+    for name, cam, _label, _dims in CAMERA_VIEWS:
+        png = os.path.join(out_dir, f"view_{name}.png")
+        if reuse and os.path.isfile(png) and os.path.getsize(png) > 0:
+            images[name] = png
+        else:
+            todo.append((name, cam))
+    if reuse and images:
+        print(f"[argos_report] reusing {len(images)} existing render(s)")
+    if not todo:
+        return images
 
     if not conv:
-        print("[argos_report] mayo-conv not found -> skipping 3D images")
-        return {}
+        print("[argos_report] mayo-conv not found -> skipping missing 3D images")
+        return images
     try:
         from PIL import Image
     except Exception:
         print("[argos_report] Pillow not installed (pip install pillow) -> skipping 3D images")
-        return {}
+        return images
 
-    for name, cam, _caption in CAMERA_VIEWS:
+    for name, cam in todo:
         ini = os.path.join(out_dir, f"_render_{name}.ini")
         ppm = os.path.join(out_dir, f"_render_{name}.ppm")
         png = os.path.join(out_dir, f"view_{name}.png")
@@ -125,6 +130,131 @@ def render_views(conv, step, out_dir, width=1600, height=1200, reuse=False):
             except OSError:
                 pass
     return images
+
+
+def _load_font(size, bold=False):
+    from PIL import ImageFont
+    for fp in ((r"C:\Windows\Fonts\malgunbd.ttf" if bold else r"C:\Windows\Fonts\malgun.ttf"),
+               r"C:\Windows\Fonts\malgun.ttf"):
+        try:
+            return ImageFont.truetype(fp, size)
+        except Exception:
+            pass
+    return ImageFont.load_default()
+
+
+def _arrow_h(draw, x0, x1, y, color, a=14, w=3):
+    draw.line([(x0, y), (x1, y)], fill=color, width=w)
+    draw.polygon([(x0, y), (x0 + a, y - a // 2), (x0 + a, y + a // 2)], fill=color)
+    draw.polygon([(x1, y), (x1 - a, y - a // 2), (x1 - a, y + a // 2)], fill=color)
+
+
+def _arrow_v(draw, x, y0, y1, color, a=14, w=3):
+    draw.line([(x, y0), (x, y1)], fill=color, width=w)
+    draw.polygon([(x, y0), (x - a // 2, y0 + a), (x + a // 2, y0 + a)], fill=color)
+    draw.polygon([(x, y1), (x - a // 2, y1 - a), (x + a // 2, y1 - a)], fill=color)
+
+
+def annotate_image(src, dst, hval, vval, hlabel, vlabel):
+    """Draw labelled dimension arrows (horizontal + vertical) onto a rendered
+    orthographic view, so the reader can see which direction is width vs height.
+    The part silhouette is detected by thresholding against the light background;
+    extra padding is added on the left/bottom to hold the dimension lines."""
+    try:
+        from PIL import Image, ImageDraw
+    except Exception:
+        return False
+    try:
+        im = Image.open(src).convert("RGB")
+    except Exception:
+        return False
+
+    # Part silhouette bbox (background is light: luminance > ~210)
+    mask = im.convert("L").point(lambda p: 255 if p < 210 else 0)
+    box = mask.getbbox()
+    if not box:
+        return False
+
+    W, H = im.size
+    # Scale all annotation sizes to the image so labels stay legible even when the
+    # image is shrunk into a multi-view grid.
+    fs = max(30, int(W * 0.040))          # label font size
+    aw = max(3, int(W * 0.0045))          # arrow line width
+    ah = max(12, int(W * 0.020))          # arrowhead size
+    ew = max(1, int(W * 0.0016))          # extension line width
+    PL = int(W * 0.20)
+    PB = int(W * 0.17)
+    PT = int(W * 0.02)
+    PR = int(W * 0.03)
+    canvas = Image.new("RGB", (W + PL + PR, H + PT + PB), (251, 252, 254))
+    canvas.paste(im, (PL, PT))
+    x0, y0, x1, y1 = box[0] + PL, box[1] + PT, box[2] + PL, box[3] + PT
+
+    d = ImageDraw.Draw(canvas)
+    RED = (193, 57, 43)
+    GREY = (120, 124, 128)
+    font = _load_font(fs, bold=True)
+    gap = int(fs * 0.5)
+
+    def text_w(s):
+        try:
+            b = d.textbbox((0, 0), s, font=font)
+            return b[2] - b[0], b[3] - b[1]
+        except Exception:
+            return (len(s) * fs // 2, fs)
+
+    # Horizontal dimension (width) along the bottom padding
+    if hval is not None:
+        ydim = y1 + int(fs * 1.6)
+        d.line([(x0, y1 + gap), (x0, ydim + gap)], fill=GREY, width=ew)   # extension lines
+        d.line([(x1, y1 + gap), (x1, ydim + gap)], fill=GREY, width=ew)
+        _arrow_h(d, x0, x1, ydim, RED, a=ah, w=aw)
+        s = f"가로 {hlabel} = {fnum(hval, 1)} mm"
+        tw, th = text_w(s)
+        tx = max(2, (x0 + x1) // 2 - tw // 2)
+        d.rectangle([tx - 8, ydim + gap, tx + tw + 8, ydim + gap + th + 12], fill=(255, 255, 255))
+        d.text((tx, ydim + gap + 4), s, fill=RED, font=font)
+
+    # Vertical dimension (height) along the left padding
+    if vval is not None:
+        xdim = x0 - int(fs * 1.8)
+        d.line([(x0 + gap // 2, y0), (xdim - gap, y0)], fill=GREY, width=ew)
+        d.line([(x0 + gap // 2, y1), (xdim - gap, y1)], fill=GREY, width=ew)
+        _arrow_v(d, xdim, y0, y1, RED, a=ah, w=aw)
+        s = f"세로 {vlabel} = {fnum(vval, 1)} mm"
+        tw, th = text_w(s)
+        lbl = Image.new("RGBA", (tw + 16, th + 16), (255, 255, 255, 235))
+        ld = ImageDraw.Draw(lbl)
+        ld.text((8, 6), s, fill=RED, font=font)
+        lbl = lbl.rotate(90, expand=True)
+        ly = max(2, (y0 + y1) // 2 - lbl.height // 2)
+        canvas.paste(lbl, (max(2, xdim - gap - lbl.width), ly), lbl)
+
+    try:
+        canvas.save(dst)
+        return True
+    except Exception:
+        return False
+
+
+def annotate_views(images, bbox, out_dir):
+    """Produce dimension-annotated copies of the orthographic renders. Returns a
+    new images dict where annotatable views point to the *_dim.png versions."""
+    if not images or not bbox:
+        return images
+    dimmap = {name: dims for name, _c, _l, dims in CAMERA_VIEWS}
+    result = dict(images)
+    for name, raw in images.items():
+        dims = dimmap.get(name)
+        if not dims:
+            continue
+        hkey, vkey = dims
+        dst = os.path.join(out_dir, f"view_{name}_dim.png")
+        if annotate_image(raw, dst, bbox.get(hkey), bbox.get(vkey),
+                          hkey.upper(), vkey.upper()):
+            result[name] = dst
+            print(f"[argos_report] annotated {name} -> {os.path.basename(dst)}")
+    return result
 
 
 def run_cli(cli, args):
@@ -209,6 +339,7 @@ def main():
     images = {}
     if not a.no_images:
         images = render_views(find_conv(a.conv), step, out_dir, reuse=a.reuse)
+        images = annotate_views(images, dg.get("bboxSize"), out_dir)
 
     pptx_path = os.path.join(out_dir, stem + "_report.pptx")
     build_pptx(dg, urdf_txt, step, a.density, a.material, pptx_path, images)
@@ -223,7 +354,7 @@ def build_pptx(dg, urdf, step, density, material, path, images=None):
     from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 
     images = images or {}
-    captions = {n: c for n, _cam, c in CAMERA_VIEWS}
+    captions = {n: c for n, _cam, c, _d in CAMERA_VIEWS}
 
     ACCENT = RGBColor(0x1F, 0x6F, 0xC2)
     INK = RGBColor(0x22, 0x24, 0x26)
@@ -347,13 +478,17 @@ def build_pptx(dg, urdf, step, density, material, path, images=None):
     place_image(s, "iso", Inches(7.45), Inches(1.55), Inches(5.4), Inches(5.2),
                 caption="등각 투상도 (Argos 3D 뷰)")
 
-    # ---- Slide 2b: orthographic views (where the dimensions come from) ----
-    if any(k in images for k in ("front", "top", "right")):
+    # ---- Slide 2b: all views on one page (front / back / side / iso) with the
+    #      width & height dimensions drawn right on each orthographic image ----
+    if any(k in images for k in ("front", "back", "right", "iso")):
         s = prs.slides.add_slide(blank)
-        title_bar(s, "주요 뷰 — 측정 위치", fname)
-        cols = [("front", Inches(0.35)), ("top", Inches(4.55)), ("right", Inches(8.75))]
-        for name, left in cols:
-            place_image(s, name, left, Inches(1.45), Inches(4.25), Inches(4.6),
+        title_bar(s, "전체 뷰 — 앞 · 뒤 · 옆 · 등각", f"{fname}  ·  치수(가로/세로)가 이미지에 표시됨")
+        grid = [("front", Inches(0.45), Inches(1.30)),
+                ("back",  Inches(6.95), Inches(1.30)),
+                ("right", Inches(0.45), Inches(4.45)),
+                ("iso",   Inches(6.95), Inches(4.45))]
+        for name, l, t in grid:
+            place_image(s, name, l, t, Inches(5.9), Inches(2.55),
                         caption=captions.get(name, name))
 
     # ---- Slide 3: mass / inertia ----
