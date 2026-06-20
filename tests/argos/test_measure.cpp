@@ -305,6 +305,43 @@ int main()
         check(parsed, "to_json() produces valid JSON with ok/kind/value");
     }
 
+    // --- Mass / inertia properties (box 10x20x30, steel 7850 kg/m^3) ---------
+    {
+        const MassProperties mp = massProperties(box, 7850.0);
+        check(mp.ok, "massProperties(box).ok");
+        checkNear(mp.volume_mm3, 6000.0, 1e-2, "box volume = 6000 mm^3");
+        checkNear(mp.area_mm2, 2200.0, 1e-2, "box area = 2200 mm^2");
+        checkNear(mp.mass_kg, 0.04710, 1e-5, "box mass = 0.0471 kg (steel)");
+        checkNear(mp.com_mm.x, 5.0, 1e-6, "box COM x = 5 mm");
+        checkNear(mp.com_mm.y, 10.0, 1e-6, "box COM y = 10 mm");
+        checkNear(mp.com_mm.z, 15.0, 1e-6, "box COM z = 15 mm");
+        // analytic box inertia about COM: m/12 * (sum of the two other dims^2), in m
+        checkNear(mp.ixx, 5.1025e-6, 1e-8, "box Ixx about COM");
+        checkNear(mp.iyy, 3.9250e-6, 1e-8, "box Iyy about COM");
+        checkNear(mp.izz, 1.9625e-6, 1e-8, "box Izz about COM");
+        check(std::abs(mp.ixy) < 1e-9 && std::abs(mp.ixz) < 1e-9 && std::abs(mp.iyz) < 1e-9,
+              "box products of inertia ~ 0");
+        check(oneOf(mp.i1, { 5.1025e-6, 3.9250e-6, 1.9625e-6 }, 1e-8)
+              && oneOf(mp.i2, { 5.1025e-6, 3.9250e-6, 1.9625e-6 }, 1e-8)
+              && oneOf(mp.i3, { 5.1025e-6, 3.9250e-6, 1.9625e-6 }, 1e-8),
+              "box principal moments match the diagonal");
+
+        // density scaling: doubling density doubles mass and inertia
+        const MassProperties mp2 = massProperties(box, 15700.0);
+        checkNear(mp2.mass_kg, 2.0 * mp.mass_kg, 1e-9, "mass scales linearly with density");
+        checkNear(mp2.ixx, 2.0 * mp.ixx, 1e-10, "inertia scales linearly with density");
+
+        const std::string urdf = toUrdfInertial(mp);
+        check(urdf.find("<inertial>") != std::string::npos
+              && urdf.find("mass value") != std::string::npos
+              && urdf.find("ixx") != std::string::npos,
+              "URDF <inertial> snippet generated");
+
+        // a face (no volume) must fail cleanly
+        const MassProperties mpFace = massProperties(faces.front(), 7850.0);
+        check(!mpFace.ok, "massProperties(face) fails cleanly (no volume)");
+    }
+
     std::cout << "\n== " << (g_checks - g_failures) << "/" << g_checks
               << " checks passed, " << g_failures << " failed ==\n";
     return g_failures == 0 ? 0 : 1;

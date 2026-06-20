@@ -44,6 +44,7 @@ void printUsage()
         "Usage:\n"
         "  argos-cli measure <file> [selection...] [options]\n"
         "  argos-cli section <file> [--plane xy|yz|zx] [--offset N] [--flip] [options]\n"
+        "  argos-cli props   <file> [--density N] [--urdf] [--pretty]\n"
         "  argos-cli info    <file> [--pretty]\n\n"
         "measure selection (order matters; mix freely, SolidWorks-style):\n"
         "  --vertex N      select the N-th vertex (1-based)\n"
@@ -57,6 +58,9 @@ void printUsage()
         "  --origin X Y Z            point the plane passes through (default 0,0,0)\n"
         "  --offset N                signed distance moved along the normal\n"
         "  --flip                    reverse the cut side\n\n"
+        "props options (mass / inertia for rigid-body dynamics):\n"
+        "  --density N               material density in kg/m^3 (default 7850, steel)\n"
+        "  --urdf                    print a ROS/URDF <inertial> block instead of JSON\n\n"
         "common:\n"
         "  --pretty           pretty-print the JSON\n\n"
         "Supported formats: STEP (.step/.stp), IGES (.iges/.igs), BREP (.brep).\n";
@@ -257,6 +261,46 @@ int doSection(const std::vector<std::string>& args)
     return res.ok ? 0 : 1;
 }
 
+int doProps(const std::vector<std::string>& args)
+{
+    std::string file;
+    double density = 7850.0; // mild steel
+    bool urdf = false;
+    int indent = -1;
+
+    for (size_t i = 2; i < args.size(); ++i) {
+        const std::string& a = args[i];
+        if (a == "--density") {
+            double d = 0;
+            if (i + 1 >= args.size() || !parseDouble(args[++i], d) || d <= 0.0)
+                return emitError("invalid value after --density", indent);
+            density = d;
+        }
+        else if (a == "--urdf")        urdf = true;
+        else if (a == "--pretty")      indent = 2;
+        else if (!a.empty() && a[0] == '-') return emitError("unknown option: " + a, indent);
+        else if (file.empty())         file = a;
+        else return emitError("unexpected argument: " + a, indent);
+    }
+
+    if (file.empty())
+        return emitError("no input file given", indent);
+
+    std::string loadErr;
+    const TopoDS_Shape shape = argos::loadShape(file, &loadErr);
+    if (shape.IsNull())
+        return emitError(loadErr.empty() ? "failed to load file" : loadErr, indent);
+
+    const argos::MassProperties mp = argos::massProperties(shape, density);
+    if (urdf) {
+        std::cout << argos::toUrdfInertial(mp) << std::endl;
+        return mp.ok ? 0 : 1;
+    }
+
+    std::cout << argos::to_json(mp, indent) << std::endl;
+    return mp.ok ? 0 : 1;
+}
+
 int runMain(const std::vector<std::string>& args)
 {
     if (args.size() < 2) {
@@ -271,6 +315,8 @@ int runMain(const std::vector<std::string>& args)
         return doInfo(args);
     if (cmd == "section")
         return doSection(args);
+    if (cmd == "props")
+        return doProps(args);
     if (cmd == "-h" || cmd == "--help" || cmd == "help") {
         printUsage();
         return 0;

@@ -93,4 +93,33 @@ MeasureResult dispatch(const std::vector<TopoDS_Shape>& shapes, const MeasureOpt
 // for pretty-printing).
 std::string to_json(const MeasureResult& res, int indent = -1);
 
+// --- Mass / inertia properties (rigid-body dynamics, e.g. robot links) -------
+
+// Mass properties of a solid. Lengths stay in the model unit (mm); mass/inertia
+// are SI (kg, kg*m^2) from the given density, with the inertia tensor expressed
+// about the centre of mass (URDF/robotics convention).
+struct MassProperties {
+    bool ok = false;
+    std::string error;
+    double density = 0.0;       // kg/m^3 used
+    double volume_mm3 = 0.0;    // model units (mm^3)
+    double area_mm2 = 0.0;      // surface area (mm^2)
+    double mass_kg = 0.0;       // volume * density (SI)
+    Vec3 com_mm;               // centre of mass (mm, model frame)
+    // Inertia tensor about the COM, SI (kg*m^2)
+    double ixx = 0, iyy = 0, izz = 0, ixy = 0, ixz = 0, iyz = 0;
+    // Principal moments of inertia about the COM, SI (kg*m^2)
+    double i1 = 0, i2 = 0, i3 = 0;
+};
+
+// Compute mass properties of the solids in 'shape'. Never throws. Density
+// defaults to mild steel (7850 kg/m^3). ok == false if the shape has no volume.
+MassProperties massProperties(const TopoDS_Shape& shape, double densityKgPerM3 = 7850.0);
+
+std::string to_json(const MassProperties& m, int indent = -1);
+
+// Emit a ROS/URDF <inertial> XML block (mass, COM origin in metres, inertia
+// about the COM) for humanoid/robot link definitions.
+std::string toUrdfInertial(const MassProperties& m);
+
 } // namespace argos

@@ -12,7 +12,9 @@
 #include <BRepGProp.hxx>
 #include <BRep_Tool.hxx>
 #include <GProp_GProps.hxx>
+#include <GProp_PrincipalProps.hxx>
 #include <Precision.hxx>
+#include <gp_Mat.hxx>
 #include <Standard_Failure.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
@@ -27,6 +29,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace argos {
 
@@ -457,6 +460,128 @@ std::string to_json(const MeasureResult& res, int indent)
     addVec(j, "bboxSize", res.bboxSize);
 
     return j.dump(indent, ' ', false, onBadUtf8);
+}
+
+// --- Mass / inertia properties ----------------------------------------------
+
+MassProperties massProperties(const TopoDS_Shape& shape, double densityKgPerM3)
+{
+    MassProperties r;
+    r.density = densityKgPerM3;
+    if (shape.IsNull()) {
+        r.error = "null shape";
+        return r;
+    }
+
+    try {
+        // Volume properties (implicit density 1): values are in model units (mm).
+        GProp_GProps vol;
+        BRepGProp::VolumeProperties(shape, vol);
+        const double V = vol.Mass(); // volume in mm^3 (density 1)
+        if (!std::isfinite(V) || V <= 1.0e-9) {
+            r.error = "shape has no volume (not a solid)";
+            return r;
+        }
+
+        GProp_GProps surf;
+        BRepGProp::SurfaceProperties(shape, surf);
+        r.area_mm2 = surf.Mass();
+        r.volume_mm3 = V;
+
+        const gp_Pnt c = vol.CentreOfMass();
+        r.com_mm = toVec3(c);
+
+        // SI mass
+        const double volume_m3 = V * 1.0e-9;
+        r.mass_kg = volume_m3 * densityKgPerM3;
+
+        // OCCT's MatrixOfInertia (from VolumeProperties) is expressed about the
+        // centre of mass, so use it directly (density 1, units mm^5). No shift.
+        const gp_Mat Ic = vol.MatrixOfInertia();
+        const double Ic_xx = Ic(1, 1);
+        const double Ic_yy = Ic(2, 2);
+        const double Ic_zz = Ic(3, 3);
+        const double Ic_xy = Ic(1, 2);
+        const double Ic_xz = Ic(1, 3);
+        const double Ic_yz = Ic(2, 3);
+
+        // Convert (density-1, mm^5) -> SI kg*m^2: multiply by density * 1e-15.
+        // [ rho(kg/mm^3)=rho_si*1e-9 ] * [ mm^5 ] = kg*mm^2; *1e-6 -> kg*m^2.
+        const double k = densityKgPerM3 * 1.0e-15;
+        r.ixx = Ic_xx * k;
+        r.iyy = Ic_yy * k;
+        r.izz = Ic_zz * k;
+        r.ixy = Ic_xy * k;
+        r.ixz = Ic_xz * k;
+        r.iyz = Ic_yz * k;
+
+        // Principal moments about the COM (density 1, mm^5) -> SI.
+        GProp_PrincipalProps pp = vol.PrincipalProperties();
+        double pm1 = 0, pm2 = 0, pm3 = 0;
+        pp.Moments(pm1, pm2, pm3);
+        r.i1 = pm1 * k;
+        r.i2 = pm2 * k;
+        r.i3 = pm3 * k;
+
+        r.ok = true;
+    }
+    catch (const Standard_Failure& e) {
+        r.error = e.GetMessageString() ? e.GetMessageString() : "OpenCASCADE failure";
+    }
+    catch (...) {
+        r.error = "unknown error computing mass properties";
+    }
+
+    return r;
+}
+
+std::string to_json(const MassProperties& m, int indent)
+{
+    const auto onBadUtf8 = nlohmann::ordered_json::error_handler_t::replace;
+    nlohmann::ordered_json j;
+    j["ok"] = m.ok;
+    if (!m.ok) {
+        j["error"] = m.error;
+        return j.dump(indent, ' ', false, onBadUtf8);
+    }
+
+    j["density_kg_m3"] = m.density;
+    j["volume_mm3"] = m.volume_mm3;
+    j["area_mm2"] = m.area_mm2;
+    j["mass_kg"] = m.mass_kg;
+    j["com_mm"] = { { "x", m.com_mm.x }, { "y", m.com_mm.y }, { "z", m.com_mm.z } };
+    // Inertia tensor about COM (kg*m^2)
+    j["inertia_com_kg_m2"] = {
+        { "ixx", m.ixx }, { "iyy", m.iyy }, { "izz", m.izz },
+        { "ixy", m.ixy }, { "ixz", m.ixz }, { "iyz", m.iyz }
+    };
+    j["principal_moments_kg_m2"] = { m.i1, m.i2, m.i3 };
+    return j.dump(indent, ' ', false, onBadUtf8);
+}
+
+std::string toUrdfInertial(const MassProperties& m)
+{
+    if (!m.ok)
+        return std::string("<!-- mass properties unavailable: ") + m.error + " -->";
+
+    // COM in metres (model unit assumed mm).
+    const double x = m.com_mm.x * 1.0e-3;
+    const double y = m.com_mm.y * 1.0e-3;
+    const double z = m.com_mm.z * 1.0e-3;
+
+    char buf[1024];
+    std::snprintf(
+        buf, sizeof(buf),
+        "<inertial>\n"
+        "  <origin xyz=\"%.6g %.6g %.6g\" rpy=\"0 0 0\"/>\n"
+        "  <mass value=\"%.6g\"/>\n"
+        "  <inertia ixx=\"%.6g\" ixy=\"%.6g\" ixz=\"%.6g\""
+        " iyy=\"%.6g\" iyz=\"%.6g\" izz=\"%.6g\"/>\n"
+        "</inertial>",
+        x, y, z, m.mass_kg,
+        m.ixx, m.ixy, m.ixz, m.iyy, m.iyz, m.izz
+    );
+    return std::string(buf);
 }
 
 } // namespace argos
