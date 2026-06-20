@@ -81,6 +81,8 @@ private:
     IMeasureTool* m_tool = nullptr;
     QString m_errorMessage;
     QString m_resultText;   // Argos: formatted readout of the current selection set
+    QString m_lastShort;    // Argos: one-line summary of the last result (for "값 복사")
+    QString m_lastJson;     // Argos: JSON of the last result (for "JSON 복사")
 
     // Argos SolidWorks-style controls (created in code, see constructor)
     QCheckBox* m_checkShowXyz = nullptr;

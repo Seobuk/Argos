@@ -22,6 +22,7 @@
 
 #include <QtGui/QPainter>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QShortcut>
 #include <QtWidgets/QBoxLayout>
 #include <QtWidgets/QMenu>
 #include <QtWidgets/QProxyStyle>
@@ -89,18 +90,18 @@ WidgetGuiDocument::WidgetGuiDocument(GuiDocument* guiDoc, QWidget* parent)
     layoutBtns->setSpacing(0);
     layoutBtns->setContentsMargins(QMargins{0, 0, 0, 0});
 
-    m_btnFitAll = this->createViewBtn(widgetBtnsContents, Theme::Icon::Expand, tr("Fit All"));
+    m_btnFitAll = this->createViewBtn(widgetBtnsContents, Theme::Icon::Expand, tr("화면 맞춤 (전체 보기)"));
 
-    m_btnGrid = this->createViewBtn(widgetBtnsContents, Theme::Icon::Grid, tr("Edit Grid"));
+    m_btnGrid = this->createViewBtn(widgetBtnsContents, Theme::Icon::Grid, tr("그리드 편집"));
     m_btnGrid->setCheckable(true);
 
-    m_btnEditClipping = this->createViewBtn(widgetBtnsContents, Theme::Icon::ClipPlane, tr("Edit clip planes"));
+    m_btnEditClipping = this->createViewBtn(widgetBtnsContents, Theme::Icon::ClipPlane, tr("단면 / 클립 평면"));
     m_btnEditClipping->setCheckable(true);
 
-    m_btnExplode = this->createViewBtn(widgetBtnsContents, Theme::Icon::Multiple, tr("Explode assemblies"));
+    m_btnExplode = this->createViewBtn(widgetBtnsContents, Theme::Icon::Multiple, tr("조립체 분해"));
     m_btnExplode->setCheckable(true);
 
-    m_btnMeasure = this->createViewBtn(widgetBtnsContents, Theme::Icon::Measure, tr("Measure shapes"));
+    m_btnMeasure = this->createViewBtn(widgetBtnsContents, Theme::Icon::Measure, tr("형상 측정 — 점·모서리·면 클릭 (단축키 M)"));
     m_btnMeasure->setCheckable(true);
 
     layoutBtns->addWidget(m_btnFitAll);
@@ -127,6 +128,18 @@ WidgetGuiDocument::WidgetGuiDocument(GuiDocument* guiDoc, QWidget* parent)
     QObject::connect(m_btnEditClipping, &ButtonFlat::checked, this, &WidgetGuiDocument::toggleWidgetClipPlanes);
     QObject::connect(m_btnExplode, &ButtonFlat::checked, this, &WidgetGuiDocument::toggleWidgetExplode);
     QObject::connect(m_btnMeasure, &ButtonFlat::checked, this, &WidgetGuiDocument::toggleWidgetMeasure);
+
+    // Argos: keyboard shortcut "M" toggles the Measure tool. Scoped to the 3D
+    // view (WidgetWithChildren) so it never hijacks typing elsewhere in the app.
+    {
+        auto scMeasure = new QShortcut(QKeySequence(Qt::Key_M), this);
+        scMeasure->setContext(Qt::WidgetWithChildrenShortcut);
+        QObject::connect(scMeasure, &QShortcut::activated, this, [this]{
+            if (m_btnMeasure)
+                m_btnMeasure->setChecked(!m_btnMeasure->isChecked());
+        });
+    }
+
     m_controller->signalDynamicActionStarted.connectSlot([=]{ m_guiDoc->stopViewCameraAnimation(); });
     m_controller->signalViewScaled.connectSlot([=]{ m_guiDoc->stopViewCameraAnimation(); });
     m_controller->signalMouseButtonClicked.connectSlot([=](Aspect_VKeyMouse btn) {

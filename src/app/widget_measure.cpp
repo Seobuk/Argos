@@ -25,12 +25,19 @@
 
 #include <QtCore/QString>
 #include <QtCore/QtDebug>
+#include <QtGui/QAction>
+#include <QtGui/QClipboard>
 #include <QtGui/QFontDatabase>
+#include <QtGui/QGuiApplication>
+#include <QtGui/QShortcut>
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QGridLayout>
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QListWidget>
+#include <QtWidgets/QMenu>
+#include <QtWidgets/QPushButton>
+#include <QtWidgets/QVBoxLayout>
 
 #include <cmath>
 
@@ -145,8 +152,9 @@ QString formatArgosResult(const argos::MeasureResult& r)
         break;
     }
 
-    // Append compact JSON (the same payload the CLI/MCP path would emit)
-    s += QString("\n\nJSON: %1").arg(QString::fromStdString(argos::to_json(r)));
+    // Argos: the JSON payload is no longer dumped into the human-facing readout
+    // (it cluttered the result). It is still available to the user via the
+    // "JSON 복사" button and to the CLI/MCP via argos::to_json().
     return s;
 }
 
@@ -266,28 +274,101 @@ WidgetMeasure::WidgetMeasure(GuiDocument* guiDoc, QWidget* parent)
         w->setVisible(false);
     }
 
-    // Argos: SolidWorks-style options (Show XYZ, Point-to-Point) + measurement
-    // history, built in code and inserted into the panel grid (rows 5, 7-8).
+    // Argos: SolidWorks-style options (Show XYZ, Point-to-Point), quick actions
+    // (clear selection / copy value / copy JSON) and the measurement history,
+    // built in code and inserted into the panel grid (rows 5, 7-8). This is an
+    // ADDITIVE layer: the original (hidden) unit/type controls are left intact.
     m_checkShowXyz = new QCheckBox(tr("dX/dY/dZ 표시"), this);
     m_checkShowXyz->setChecked(true);
     m_checkPointToPoint = new QCheckBox(tr("점-점 거리"), this);
 
+    auto btnClearSel = new QPushButton(tr("선택 해제"), this);
+    btnClearSel->setToolTip(tr("현재 선택을 비웁니다 (Esc)"));
+    auto btnCopyValue = new QPushButton(tr("값 복사"), this);
+    btnCopyValue->setToolTip(tr("측정값을 클립보드로 복사합니다 (Ctrl+C)"));
+    auto btnCopyJson = new QPushButton(tr("JSON 복사"), this);
+    btnCopyJson->setToolTip(tr("측정 결과를 JSON으로 복사합니다 (CLI/자동화용)"));
+
     auto optionRow = new QWidget(this);
-    auto optionLayout = new QHBoxLayout(optionRow);
+    auto optionLayout = new QVBoxLayout(optionRow);
     optionLayout->setContentsMargins(0, 0, 0, 0);
-    optionLayout->addWidget(m_checkShowXyz);
-    optionLayout->addWidget(m_checkPointToPoint);
-    optionLayout->addStretch(1);
+    optionLayout->setSpacing(4);
+    {
+        auto checkRow = new QHBoxLayout;
+        checkRow->setContentsMargins(0, 0, 0, 0);
+        checkRow->addWidget(m_checkShowXyz);
+        checkRow->addWidget(m_checkPointToPoint);
+        checkRow->addStretch(1);
+        optionLayout->addLayout(checkRow);
+
+        auto actionRow = new QHBoxLayout;
+        actionRow->setContentsMargins(0, 0, 0, 0);
+        actionRow->addWidget(btnClearSel);
+        actionRow->addStretch(1);
+        actionRow->addWidget(btnCopyValue);
+        actionRow->addWidget(btnCopyJson);
+        optionLayout->addLayout(actionRow);
+    }
     m_ui->layout_Main->addWidget(optionRow, 5, 0, 1, 2);
 
-    auto historyLabel = new QLabel(tr("측정 이력"), this);
+    // History header: "측정 이력" + a "모두 지우기" button on the right (design).
+    auto historyHeader = new QWidget(this);
+    auto historyHeaderLayout = new QHBoxLayout(historyHeader);
+    historyHeaderLayout->setContentsMargins(0, 0, 0, 0);
+    historyHeaderLayout->addWidget(new QLabel(tr("측정 이력"), historyHeader));
+    historyHeaderLayout->addStretch(1);
+    auto btnClearHistory = new QPushButton(tr("모두 지우기"), historyHeader);
+    btnClearHistory->setToolTip(tr("측정 이력을 모두 비웁니다"));
+    historyHeaderLayout->addWidget(btnClearHistory);
+
     m_historyList = new QListWidget(this);
     m_historyList->setMaximumHeight(140);
-    m_ui->layout_Main->addWidget(historyLabel, 7, 0, 1, 2);
+    m_historyList->setToolTip(tr("항목을 더블클릭하거나 우클릭하여 값을 복사합니다"));
+    m_historyList->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_ui->layout_Main->addWidget(historyHeader, 7, 0, 1, 2);
     m_ui->layout_Main->addWidget(m_historyList, 8, 0, 1, 2);
 
     QObject::connect(m_checkShowXyz, &QCheckBox::toggled, this, [this]{ this->recompute(false); });
     QObject::connect(m_checkPointToPoint, &QCheckBox::toggled, this, [this]{ this->recompute(false); });
+
+    // Quick actions — all reuse existing engine/scene state; nothing is removed.
+    auto copyText = [](const QString& text) {
+        if (!text.isEmpty())
+            QGuiApplication::clipboard()->setText(text);
+    };
+    QObject::connect(btnCopyValue, &QPushButton::clicked, this, [=]{ copyText(m_lastShort); });
+    QObject::connect(btnCopyJson, &QPushButton::clicked, this, [=]{ copyText(m_lastJson); });
+    QObject::connect(btnClearSel, &QPushButton::clicked, this, [this]{
+        m_guiDoc->graphicsScene()->clearSelection();
+    });
+    QObject::connect(btnClearHistory, &QPushButton::clicked, this, [this]{
+        if (m_historyList)
+            m_historyList->clear();
+    });
+    QObject::connect(m_historyList, &QListWidget::itemDoubleClicked, this,
+                     [=](QListWidgetItem* item) { if (item) copyText(item->text()); });
+    QObject::connect(m_historyList, &QListWidget::customContextMenuRequested, this,
+                     [=](const QPoint& pos) {
+        QListWidgetItem* item = m_historyList->itemAt(pos);
+        if (!item)
+            return;
+
+        QMenu menu(this);
+        QAction* actCopy = menu.addAction(tr("복사"));
+        if (menu.exec(m_historyList->viewport()->mapToGlobal(pos)) == actCopy)
+            copyText(item->text());
+    });
+
+    // Keyboard: Esc clears the current selection, Ctrl+C copies the value.
+    // Scoped to this panel so no app-wide shortcut is ever hijacked.
+    auto scEsc = new QShortcut(QKeySequence(Qt::Key_Escape), this);
+    scEsc->setContext(Qt::WidgetWithChildrenShortcut);
+    QObject::connect(scEsc, &QShortcut::activated, this, [this]{
+        m_guiDoc->graphicsScene()->clearSelection();
+    });
+    auto scCopy = new QShortcut(QKeySequence::Copy, this);
+    scCopy->setContext(Qt::WidgetWithChildrenShortcut);
+    QObject::connect(scCopy, &QShortcut::activated, this, [=]{ copyText(m_lastShort); });
 
     this->updateMessagePanel();
 }
@@ -305,9 +386,8 @@ void WidgetMeasure::setMeasureOn(bool on)
     m_resultText.clear();
     auto gfxScene = m_guiDoc->graphicsScene();
     if (on) {
-        if (m_historyList)
-            m_historyList->clear();   // start each measuring session fresh
-
+        // Argos: history is preserved across tool re-activation; it is cleared
+        // only via the explicit "모두 지우기" button (non-destructive).
         if (getMeasureTools().empty())
             getMeasureTools().push_back(std::make_unique<MeasureToolBRep>());
 
@@ -516,6 +596,8 @@ void WidgetMeasure::recompute(bool addToHistory)
     this->clearAllMeasureDisplays();
     m_errorMessage.clear();
     m_resultText.clear();
+    m_lastShort.clear();
+    m_lastJson.clear();
 
     const std::vector<GraphicsOwnerPtr>& owners = m_vecSelectedOwner;
     if (owners.empty()) {
@@ -543,6 +625,8 @@ void WidgetMeasure::recompute(bool addToHistory)
     }
     else {
         m_resultText = formatArgosResult(res);
+        m_lastShort = formatArgosShort(res);
+        m_lastJson = QString::fromStdString(argos::to_json(res));
         if (addToHistory && m_historyList) {
             const QString line = formatArgosShort(res);
             const int n = m_historyList->count();

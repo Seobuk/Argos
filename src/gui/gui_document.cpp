@@ -43,10 +43,11 @@ static OccHandle<AIS_Trihedron> createOriginTrihedron()
     aisTrihedron->SetDatumPartColor(Prs3d_DP_XAxis, Quantity_NOC_RED2);
     aisTrihedron->SetDatumPartColor(Prs3d_DP_YAxis, Quantity_NOC_GREEN2);
     aisTrihedron->SetDatumPartColor(Prs3d_DP_ZAxis, Quantity_NOC_BLUE2);
-    aisTrihedron->SetLabel(Prs3d_DP_XAxis, "");
-    aisTrihedron->SetLabel(Prs3d_DP_YAxis, "");
-    aisTrihedron->SetLabel(Prs3d_DP_ZAxis, "");
-    //aisTrihedron->SetTextColor(Quantity_NOC_GRAY40);
+    // Argos: label the origin triad axes (X/Y/Z) for immediate spatial orientation.
+    aisTrihedron->SetLabel(Prs3d_DP_XAxis, "X");
+    aisTrihedron->SetLabel(Prs3d_DP_YAxis, "Y");
+    aisTrihedron->SetLabel(Prs3d_DP_ZAxis, "Z");
+    aisTrihedron->SetTextColor(Quantity_NOC_GRAY40);
     aisTrihedron->SetSize(60);
     aisTrihedron->SetTransformPersistence(
         new Graphic3d_TransformPers(Graphic3d_TMF_ZoomPers, axis->Ax2().Location())
@@ -492,6 +493,16 @@ void GuiDocument::setViewTrihedronMode(ViewTrihedronMode mode)
             m_aisViewCube = aisViewCube;
             aisViewCube->SetBoxColor(Quantity_NOC_GRAY75);
             //aisViewCube->SetFixedAnimationLoop(false);
+            // Argos: localized (Korean) cube face labels. OCCT decodes the label
+            // AsciiString as UTF-8 (TCollection_ExtendedString isMultiByte=true);
+            // a Hangul-capable font is set so the labels render on Windows.
+            aisViewCube->SetFont("Malgun Gothic");
+            aisViewCube->SetBoxSideLabel(V3d_Zpos, "윗면");
+            aisViewCube->SetBoxSideLabel(V3d_Zneg, "아랫면");
+            aisViewCube->SetBoxSideLabel(V3d_Yneg, "정면");
+            aisViewCube->SetBoxSideLabel(V3d_Ypos, "후면");
+            aisViewCube->SetBoxSideLabel(V3d_Xpos, "우측");
+            aisViewCube->SetBoxSideLabel(V3d_Xneg, "좌측");
             aisViewCube->SetAxesLabels("", "", "");
             this->configureViewCubeSizes();
             m_gfxScene.addObject(aisViewCube);
