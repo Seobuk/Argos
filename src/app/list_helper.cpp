@@ -208,17 +208,37 @@ void ItemDelegate::paint(
         painter->drawLine(area.x(), ll, area.x() + area.width(), ll);
     }
 
-    // Draw description
+    // Draw description + hover box.
+    // Argos fix: measure the full wrapped description, grow the box to contain it,
+    // and clip the text to that box so it can never burst out below the frame.
     if (offset) {
         const int dd = rectName.height() + m_itemSpacing;
-        const QRect rectDescription = rectShiftedText.adjusted(0, dd, 0, dd);
-        painter->setPen(m_textColor);
-        painter->setFont(fontChange(option.widget).adjustSize(-1));
-        painter->drawText(rectDescription, item->description, textOption);
-    }
+        QRect rectDescription = rectShiftedText.adjusted(0, dd, 0, dd);
+        rectDescription.setHeight(100000); // don't clip by height; box grows to fit
+        const QFont descFont = fontChange(option.widget).adjustSize(-1);
+        painter->setFont(descFont);
+        const int wrapFlags = Qt::TextWordWrap | Qt::TextWrapAnywhere;
+        const QFontMetrics fmDesc(descFont);
+        const QRect rectDrawn = fmDesc.boundingRect(rectDescription, wrapFlags, item->description);
 
-    // Draw box when item is hovered
-    if (hovered) {
+        // Grow with a 2-line safety margin so wrap-estimation differences never
+        // clip the last line; the clip below still guarantees no overflow.
+        const int boxBottom =
+            qMax(area.bottom() - 1, rectDrawn.bottom() + 2 * fmDesc.lineSpacing());
+        const QRect boxRect(area.x(), area.y(), area.width() - 1, boxBottom - area.y());
+
+        painter->save();
+        painter->setClipRect(boxRect);
+        painter->setPen(m_textColor);
+        painter->drawText(rectDescription, item->description, textOption);
+        painter->restore();
+
+        if (hovered) {
+            painter->setPen(m_frameColor);
+            painter->drawRect(boxRect);
+        }
+    }
+    else if (hovered) {
         painter->setPen(m_frameColor);
         painter->drawRect(area.adjusted(0, 0, -1, -1));
     }
