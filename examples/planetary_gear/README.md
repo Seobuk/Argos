@@ -19,7 +19,10 @@ Argos의 **STEP 자동 측정 보고서** 기능 예시입니다. 실제 **2단 
 
 ## 폴더 내용
 
-- `report/HSHG17_2stage_planetary_gear_report.pptx` — 보고서(슬라이드 5장)
+- `report/HSHG17_2stage_planetary_gear_report.pptx` — 보고서(슬라이드 6장, **3D 이미지 포함**)
+- `report/view_iso.png` · `view_front.png` · `view_top.png` · `view_right.png` —
+  Argos가 **헤드리스(offscreen)로 렌더링**한 3D 뷰. 어디를 측정했는지 한눈에 보이며,
+  창이 뜨지 않아 작업 중에도 생성됩니다.
 - `report/digest.json` — 측정 원본 데이터(JSON)
 - `report/inertial.urdf.xml` — URDF `<inertial>` 스니펫
 - 원본 STEP는 **저작권상 저장소에 포함하지 않습니다**(`.gitignore`). 아래로 받으세요.
@@ -27,11 +30,14 @@ Argos의 **STEP 자동 측정 보고서** 기능 예시입니다. 실제 **2단 
 ## 재생성 방법
 
 ```powershell
+# 0) 의존성: python-pptx + Pillow,  그리고 mayo-conv.exe(오프스크린 렌더러) 빌드 필요
+#    pip install python-pptx pillow   (mayo-conv는 argos-build.ps1이 함께 빌드)
+
 # 1) 원본 STEP 다운로드 (JVL, 무료 CAD)
 #    https://www.jvl.dk/files/Downloads-1/CAD%20drawings/step/HSHG17NxxxMHN17008M_2stage.STEP
 #    -> examples/planetary_gear/HSHG17_2stage_planetary_gear.step 로 저장
 
-# 2) 보고서 생성 (python-pptx 필요: pip install python-pptx)
+# 2) 보고서 생성 (이미지 없이 빠르게: --no-images)
 py -3.12 scripts/argos_report.py `
     examples/planetary_gear/HSHG17_2stage_planetary_gear.step `
     --material "강철(steel)" --out examples/planetary_gear/report

@@ -21,6 +21,16 @@ import sys
 
 KO_FONT = "Malgun Gothic"  # Korean-capable font for PowerPoint rendering
 
+# Offscreen 3D views to render (name -> Z-up camera projection vector, caption).
+# Captions explain which bounding-box dimensions each orthographic view shows, so
+# the reader can see *where* a measured length comes from.
+CAMERA_VIEWS = [
+    ("iso",   "1, -1, 1", "등각 투상도"),
+    ("front", "0, -1, 0", "정면도 — 폭(X) × 높이(Z)"),
+    ("top",   "0, 0, 1",  "윗면도 — 길이(X) × 폭(Y)"),
+    ("right", "1, 0, 0",  "측면도 — 폭(Y) × 높이(Z)"),
+]
+
 
 def find_cli(explicit):
     if explicit and os.path.isfile(explicit):
@@ -34,6 +44,75 @@ def find_cli(explicit):
         if os.path.isfile(c):
             return os.path.abspath(c)
     return "argos-cli.exe"
+
+
+def find_conv(explicit=None):
+    """Locate mayo-conv.exe (used for headless, offscreen 3D rendering)."""
+    if explicit and os.path.isfile(explicit):
+        return os.path.abspath(explicit)
+    here = os.path.dirname(os.path.abspath(__file__))
+    for c in (
+        os.path.join(here, "..", "build", "Release", "mayo-conv.exe"),
+        os.path.join(here, "..", "dist", "Argos", "mayo-conv.exe"),
+    ):
+        if os.path.isfile(c):
+            return os.path.abspath(c)
+    return None
+
+
+def render_views(conv, step, out_dir, width=1600, height=1200):
+    """Render shaded 3D images of the part fully offscreen via mayo-conv.
+
+    mayo-conv writes PPM (the only format OCCT can encode without FreeImage); we
+    convert to PNG with Pillow. No GUI window is shown, so this works while the
+    machine is in use. Returns {view_name: png_path}; empty if rendering is
+    unavailable (the report is still generated, just without images)."""
+    if not conv:
+        print("[argos_report] mayo-conv not found -> skipping 3D images")
+        return {}
+    try:
+        from PIL import Image
+    except Exception:
+        print("[argos_report] Pillow not installed (pip install pillow) -> skipping 3D images")
+        return {}
+
+    images = {}
+    for name, cam, _caption in CAMERA_VIEWS:
+        ini = os.path.join(out_dir, f"_render_{name}.ini")
+        ppm = os.path.join(out_dir, f"_render_{name}.ppm")
+        png = os.path.join(out_dir, f"view_{name}.png")
+        with open(ini, "w", encoding="utf-8") as f:
+            f.write(
+                "[export]\n"
+                f"Image\\width={width}\n"
+                f"Image\\height={height}\n"
+                "Image\\backgroundColorStart=#FBFCFE\n"
+                "Image\\backgroundColorEnd=#D6E2F0\n"
+                "Image\\backgroundGradientFill=Vertical\n"
+                f'Image\\cameraOrientation="{cam}"\n'
+                "Image\\cameraProjection=Orthographic\n"
+                "Image\\GraphicsShapeObjectDriver_displayMode=ShadedWithFaceBoundary\n"
+                "Image\\GraphicsMeshObjectDriver_displayMode=Shaded\n"
+            )
+        try:
+            subprocess.run([conv, step, "-e", ppm, "--use-settings", ini, "--no-progress"],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=900)
+        except Exception as e:
+            print(f"[argos_report] render {name} failed: {e}")
+        if os.path.isfile(ppm) and os.path.getsize(ppm) > 0:
+            try:
+                Image.open(ppm).save(png)
+                images[name] = png
+                print(f"[argos_report] rendered {name} -> {os.path.basename(png)}")
+            except Exception as e:
+                print(f"[argos_report] convert {name} failed: {e}")
+        for tmp in (ini, ppm):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+    return images
 
 
 def run_cli(cli, args):
@@ -66,6 +145,8 @@ def main():
     ap.add_argument("--material", default="", help="material name shown in the report")
     ap.add_argument("--out", default=None, help="output folder (default: <file>_Argos_report)")
     ap.add_argument("--cli", default=None, help="path to argos-cli.exe")
+    ap.add_argument("--conv", default=None, help="path to mayo-conv.exe (offscreen renderer)")
+    ap.add_argument("--no-images", action="store_true", help="skip 3D rendered images")
     a = ap.parse_args()
 
     step = os.path.abspath(a.step)
@@ -100,17 +181,24 @@ def main():
     with open(os.path.join(out_dir, "inertial.urdf.xml"), "w", encoding="utf-8") as f:
         f.write(urdf_txt)
 
+    images = {}
+    if not a.no_images:
+        images = render_views(find_conv(a.conv), step, out_dir)
+
     pptx_path = os.path.join(out_dir, stem + "_report.pptx")
-    build_pptx(dg, urdf_txt, step, a.density, a.material, pptx_path)
+    build_pptx(dg, urdf_txt, step, a.density, a.material, pptx_path, images)
     print(f"[argos_report] PPTX  = {pptx_path}")
     print("[argos_report] done.")
 
 
-def build_pptx(dg, urdf, step, density, material, path):
+def build_pptx(dg, urdf, step, density, material, path, images=None):
     from pptx import Presentation
     from pptx.util import Inches, Pt, Emu
     from pptx.dml.color import RGBColor
     from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+
+    images = images or {}
+    captions = {n: c for n, _cam, c in CAMERA_VIEWS}
 
     ACCENT = RGBColor(0x1F, 0x6F, 0xC2)
     INK = RGBColor(0x22, 0x24, 0x26)
@@ -177,6 +265,26 @@ def build_pptx(dg, urdf, step, density, material, path):
                     cell.fill.fore_color.rgb = RGBColor(0xF4, 0xF6, 0xF8) if (ri % 2) else WHITE
         return gt
 
+    def place_image(slide, name, l, t, max_w, max_h, caption=None):
+        path_img = images.get(name)
+        if not path_img or not os.path.isfile(path_img):
+            return None
+        try:
+            from PIL import Image as _Img
+            iw, ih = _Img.open(path_img).size
+        except Exception:
+            iw, ih = 4, 3
+        ratio = min(max_w / iw, max_h / ih)
+        w, h = int(iw * ratio), int(ih * ratio)
+        left = l + (max_w - w) // 2
+        pic = slide.shapes.add_picture(path_img, left, t, width=w, height=h)
+        pic.line.color.rgb = RGBColor(0xCF, 0xD6, 0xDE)
+        pic.line.width = Pt(0.75)
+        if caption:
+            textbox(slide, l, t + h + Inches(0.03), max_w, Inches(0.35), caption,
+                    size=11, color=DIM, align=PP_ALIGN.CENTER)
+        return pic
+
     bb = dg.get("bboxSize") or {}
     counts = dg.get("counts") or {}
     mass = dg.get("mass") or {}
@@ -195,7 +303,7 @@ def build_pptx(dg, urdf, step, density, material, path):
             f"파일: {fname}\n재료/밀도: {mat_label}\n생성: Argos (argos-cli digest/props)",
             size=16, color=RGBColor(0xCF, 0xDD, 0xEE))
 
-    # ---- Slide 2: overview / dimensions ----
+    # ---- Slide 2: overview / dimensions (+ iso render) ----
     s = prs.slides.add_slide(blank)
     title_bar(s, "개요 · 주요 치수", fname)
     rows = [["항목", "값"]]
@@ -208,7 +316,20 @@ def build_pptx(dg, urdf, step, density, material, path):
         rows.append(["표면적", f"{fnum(mass.get('area_mm2'))} mm²"])
     rows.append(["솔리드 / 면 / 모서리",
                  f"{counts.get('solids','-')} / {counts.get('faces','-')} / {counts.get('edges','-')}"])
-    add_table(s, rows, Inches(0.7), Inches(1.4), Inches(11.9), [0.42, 0.58])
+    has_iso = "iso" in images
+    table_w = Inches(6.7) if has_iso else Inches(11.9)
+    add_table(s, rows, Inches(0.55), Inches(1.45), table_w, [0.46, 0.54])
+    place_image(s, "iso", Inches(7.45), Inches(1.55), Inches(5.4), Inches(5.2),
+                caption="등각 투상도 (Argos 3D 뷰)")
+
+    # ---- Slide 2b: orthographic views (where the dimensions come from) ----
+    if any(k in images for k in ("front", "top", "right")):
+        s = prs.slides.add_slide(blank)
+        title_bar(s, "주요 뷰 — 측정 위치", fname)
+        cols = [("front", Inches(0.35)), ("top", Inches(4.55)), ("right", Inches(8.75))]
+        for name, left in cols:
+            place_image(s, name, left, Inches(1.45), Inches(4.25), Inches(4.6),
+                        caption=captions.get(name, name))
 
     # ---- Slide 3: mass / inertia ----
     s = prs.slides.add_slide(blank)
@@ -243,7 +364,9 @@ def build_pptx(dg, urdf, step, density, material, path):
         rows = [["#", "지름 (mm)", "반경 (mm)"]]
         for i, d in enumerate(diam, 1):
             rows.append([i, fnum(d, 3), fnum(float(d) / 2.0, 3)])
-        add_table(s, rows, Inches(0.7), Inches(1.4), Inches(8.0), [0.16, 0.42, 0.42])
+        add_table(s, rows, Inches(0.6), Inches(1.4), Inches(6.0), [0.16, 0.42, 0.42])
+        place_image(s, "iso", Inches(7.0), Inches(1.55), Inches(5.8), Inches(5.2),
+                    caption="원통면 위치 (등각 투상도)")
     else:
         textbox(s, Inches(0.7), Inches(1.6), Inches(11), Inches(1),
                 "원통면이 감지되지 않았습니다.", size=16, color=DIM)

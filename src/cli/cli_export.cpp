@@ -92,11 +92,12 @@ bool importInDocument(DocumentPtr doc, const CliExportArgs& args, Helper* helper
 {
     auto appModule = AppModule::get();
 
-    // If export operation targets some mesh format then force meshing of imported BRep shapes
+    // If export operation targets some mesh format (or an offscreen image render, which needs
+    // triangulated faces to show shading) then force meshing of imported BRep shapes
     bool brepMeshRequired = false;
     for (const FilePath& filepath : args.filesToExport) {
         const IO::Format format = appModule->ioSystem()->probeFormat(filepath);
-        brepMeshRequired = IO::formatProvidesMesh(format);
+        brepMeshRequired = IO::formatProvidesMesh(format) || format == IO::Format_Image;
         if (brepMeshRequired)
             break; // Interrupt
     }
