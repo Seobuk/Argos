@@ -23,6 +23,7 @@ class WidgetClipPlanes;
 class WidgetExplodeAssembly;
 class WidgetGrid;
 class WidgetMeasure;
+class WidgetSection;
 
 // QWidget providing user-interaction with a GuiDocument object
 class WidgetGuiDocument : public QWidget {
@@ -50,6 +51,7 @@ private:
     void toggleWidgetClipPlanes(bool on);
     void toggleWidgetExplode(bool on);
     void toggleWidgetMeasure(bool on);
+    void toggleWidgetSection(bool on);
     void exclusiveButtonCheck(const ButtonFlat* btn);
 
     void createMenuViewProjections(QWidget* container);
@@ -71,6 +73,7 @@ private:
     WidgetExplodeAssembly* m_widgetExplodeAsm = nullptr;
     WidgetGrid* m_widgetGrid = nullptr;
     WidgetMeasure* m_widgetMeasure = nullptr;
+    WidgetSection* m_widgetSection = nullptr;
     QRect m_rectControls;
 
     ButtonFlat* m_btnFitAll = nullptr;
@@ -78,6 +81,7 @@ private:
     ButtonFlat* m_btnEditClipping = nullptr;
     ButtonFlat* m_btnExplode = nullptr;
     ButtonFlat* m_btnMeasure = nullptr;
+    ButtonFlat* m_btnSection = nullptr;
 };
 
 } // namespace Mayo

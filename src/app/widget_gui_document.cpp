@@ -16,6 +16,7 @@
 #include "widget_explode_assembly.h"
 #include "widget_grid.h"
 #include "widget_measure.h"
+#include "widget_section.h"
 #include "widget_occ_view.h"
 #include "widget_occ_view_controller.h"
 #include "qtwidgets_utils.h"
@@ -95,7 +96,7 @@ WidgetGuiDocument::WidgetGuiDocument(GuiDocument* guiDoc, QWidget* parent)
     m_btnGrid = this->createViewBtn(widgetBtnsContents, Theme::Icon::Grid, tr("그리드 편집"));
     m_btnGrid->setCheckable(true);
 
-    m_btnEditClipping = this->createViewBtn(widgetBtnsContents, Theme::Icon::ClipPlane, tr("단면 / 클립 평면"));
+    m_btnEditClipping = this->createViewBtn(widgetBtnsContents, Theme::Icon::ClipPlane, tr("클립 평면 (고급 — 다중/사용자 평면)"));
     m_btnEditClipping->setCheckable(true);
 
     m_btnExplode = this->createViewBtn(widgetBtnsContents, Theme::Icon::Multiple, tr("조립체 분해"));
@@ -104,6 +105,9 @@ WidgetGuiDocument::WidgetGuiDocument(GuiDocument* guiDoc, QWidget* parent)
     m_btnMeasure = this->createViewBtn(widgetBtnsContents, Theme::Icon::Measure, tr("형상 측정 — 점·모서리·면 클릭 (단축키 M)"));
     m_btnMeasure->setCheckable(true);
 
+    m_btnSection = this->createViewBtn(widgetBtnsContents, Theme::Icon::ClipPlane, tr("단면 — XY/YZ/ZX 절단 + 캡"));
+    m_btnSection->setCheckable(true);
+
     layoutBtns->addWidget(m_btnFitAll);
     this->createMenuViewProjections(widgetBtnsContents);
     this->createMenuItemVisibility(widgetBtnsContents);
@@ -111,6 +115,7 @@ WidgetGuiDocument::WidgetGuiDocument(GuiDocument* guiDoc, QWidget* parent)
     layoutBtns->addWidget(m_btnEditClipping);
     layoutBtns->addWidget(m_btnExplode);
     layoutBtns->addWidget(m_btnMeasure);
+    layoutBtns->addWidget(m_btnSection);
     m_widgetBtns = this->createWidgetPanelContainer(widgetBtnsContents);
 
     auto gfxScene = m_guiDoc->graphicsScene();
@@ -128,6 +133,7 @@ WidgetGuiDocument::WidgetGuiDocument(GuiDocument* guiDoc, QWidget* parent)
     QObject::connect(m_btnEditClipping, &ButtonFlat::checked, this, &WidgetGuiDocument::toggleWidgetClipPlanes);
     QObject::connect(m_btnExplode, &ButtonFlat::checked, this, &WidgetGuiDocument::toggleWidgetExplode);
     QObject::connect(m_btnMeasure, &ButtonFlat::checked, this, &WidgetGuiDocument::toggleWidgetMeasure);
+    QObject::connect(m_btnSection, &ButtonFlat::checked, this, &WidgetGuiDocument::toggleWidgetSection);
 
     // Argos: keyboard shortcut "M" toggles the Measure tool. Scoped to the 3D
     // view (WidgetWithChildren) so it never hijacks typing elsewhere in the app.
@@ -240,6 +246,26 @@ void WidgetGuiDocument::toggleWidgetClipPlanes(bool on)
     this->updageWidgetPanelControls(m_widgetClipPlanes, m_btnEditClipping);
 }
 
+void WidgetGuiDocument::toggleWidgetSection(bool on)
+{
+    if (!m_widgetSection && on) {
+        m_widgetSection = new WidgetSection(m_guiDoc);
+        auto container = this->createWidgetPanelContainer(m_widgetSection);
+        QObject::connect(
+            m_widgetSection, &WidgetSection::sizeAdjustmentRequested,
+            container, [=]{ adjustWidgetSize(m_widgetSection); },
+            Qt::QueuedConnection
+        );
+        m_guiDoc->signalGraphicsBoundingBoxChanged.connectSlot(&WidgetSection::setRanges, m_widgetSection);
+        m_widgetSection->setRanges(m_guiDoc->graphicsBoundingBox());
+    }
+
+    if (m_widgetSection)
+        m_widgetSection->setSectionOn(on);
+
+    this->updageWidgetPanelControls(m_widgetSection, m_btnSection);
+}
+
 void WidgetGuiDocument::toggleWidgetExplode(bool on)
 {
     if (!m_widgetExplodeAsm && on) {
@@ -273,7 +299,7 @@ void WidgetGuiDocument::exclusiveButtonCheck(const ButtonFlat* btnCheck)
     if (!btnCheck || !btnCheck->isChecked())
         return;
 
-    ButtonFlat* arrayToggleBtn[] = { m_btnGrid, m_btnEditClipping, m_btnExplode, m_btnMeasure };
+    ButtonFlat* arrayToggleBtn[] = { m_btnGrid, m_btnEditClipping, m_btnExplode, m_btnMeasure, m_btnSection };
     for (ButtonFlat* btn : arrayToggleBtn) {
         assert(btn->isCheckable());
         if (btn != btnCheck)
@@ -294,7 +320,7 @@ void WidgetGuiDocument::layoutWidgetPanel(QWidget* panel)
 void WidgetGuiDocument::layoutWidgetPanels()
 {
     QWidget* widgetPanels[] = {
-        m_widgetGrid, m_widgetClipPlanes, m_widgetExplodeAsm, m_widgetMeasure
+        m_widgetGrid, m_widgetClipPlanes, m_widgetExplodeAsm, m_widgetMeasure, m_widgetSection
     };
     for (QWidget* panel : widgetPanels)
         this->layoutWidgetPanel(panel);
