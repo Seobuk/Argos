@@ -88,11 +88,31 @@ struct OpenFileNames {
         OpenFileNames result;
         result.lastIoSettings = ImportExportSettings::load();
         QStringList listFormatFilter;
-        for (IO::Format format : AppModule::get()->ioSystem()->readerFormats())
+        QStringList allSuffixes;
+        for (IO::Format format : AppModule::get()->ioSystem()->readerFormats()) {
             listFormatFilter += fileFilter(format);
+            for (std::string_view suffix : IO::formatFileSuffixes(format))
+                allSuffixes += (QStringLiteral("*.") + to_QString(suffix));
+        }
+
+        // Argos: a combined "all supported formats" entry, placed first so it is
+        // the default selection — every compatible file is visible at once.
+        allSuffixes.removeDuplicates();
+        const QString allSupportedFilter =
+            Command::tr("모든 지원 형식(%1)").arg(allSuffixes.join(QLatin1Char(' ')));
+        listFormatFilter.prepend(allSupportedFilter);
 
         const QString allFilesFilter = Command::tr("All files(*.*)");
         listFormatFilter.append(allFilesFilter);
+
+        // Default to "all supported" unless the user has a still-valid remembered
+        // choice — prevents the dialog getting stuck showing a single extension.
+        if (result.lastIoSettings.selectedFilter.isEmpty()
+                || !listFormatFilter.contains(result.lastIoSettings.selectedFilter))
+        {
+            result.lastIoSettings.selectedFilter = allSupportedFilter;
+        }
+
         const QString dlgTitle = Command::tr("Select Part File");
         const QString dlgOpenDir = filepathTo<QString>(result.lastIoSettings.openDir);
         const QString dlgFilter = listFormatFilter.join(QLatin1String(";;"));
