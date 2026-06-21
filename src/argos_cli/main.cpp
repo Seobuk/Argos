@@ -45,6 +45,7 @@ void printUsage()
         "  argos-cli measure <file> [selection...] [options]\n"
         "  argos-cli section <file> [--plane xy|yz|zx] [--offset N] [--flip] [options]\n"
         "  argos-cli props   <file> [--density N] [--urdf] [--pretty]\n"
+        "  argos-cli digest  <file> [--density N] [--pretty]\n"
         "  argos-cli info    <file> [--pretty]\n\n"
         "measure selection (order matters; mix freely, SolidWorks-style):\n"
         "  --vertex N      select the N-th vertex (1-based)\n"
@@ -301,6 +302,37 @@ int doProps(const std::vector<std::string>& args)
     return mp.ok ? 0 : 1;
 }
 
+int doDigest(const std::vector<std::string>& args)
+{
+    std::string file;
+    double density = 7850.0;
+    int indent = -1;
+    for (size_t i = 2; i < args.size(); ++i) {
+        const std::string& a = args[i];
+        if (a == "--density") {
+            double d = 0;
+            if (i + 1 >= args.size() || !parseDouble(args[++i], d) || d <= 0.0)
+                return emitError("invalid value after --density", indent);
+            density = d;
+        }
+        else if (a == "--pretty")           indent = 2;
+        else if (!a.empty() && a[0] == '-') return emitError("unknown option: " + a, indent);
+        else if (file.empty())              file = a;
+        else return emitError("unexpected argument: " + a, indent);
+    }
+    if (file.empty())
+        return emitError("no input file given", indent);
+
+    std::string loadErr;
+    const TopoDS_Shape shape = argos::loadShape(file, &loadErr);
+    if (shape.IsNull())
+        return emitError(loadErr.empty() ? "failed to load file" : loadErr, indent);
+
+    const argos::DigestResult dg = argos::digest(shape, density);
+    std::cout << argos::to_json(dg, indent) << std::endl;
+    return dg.ok ? 0 : 1;
+}
+
 int runMain(const std::vector<std::string>& args)
 {
     if (args.size() < 2) {
@@ -317,6 +349,8 @@ int runMain(const std::vector<std::string>& args)
         return doSection(args);
     if (cmd == "props")
         return doProps(args);
+    if (cmd == "digest")
+        return doDigest(args);
     if (cmd == "-h" || cmd == "--help" || cmd == "help") {
         printUsage();
         return 0;

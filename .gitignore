@@ -14,3 +14,10 @@ vcpkg_installed/
 
 # User-provided sample model (do not commit)
 Example.step
+
+# Example CAD sources (vendor-provided; not redistributed). Generated reports
+# under examples/**/report/ ARE committed.
+examples/**/*.step
+examples/**/*.stp
+examples/**/*.STEP
+examples/**/*.STP

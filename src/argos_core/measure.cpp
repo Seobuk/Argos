@@ -9,8 +9,12 @@
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepBndLib.hxx>
 #include <BRepGProp.hxx>
 #include <BRep_Tool.hxx>
+#include <Bnd_Box.hxx>
+#include <TopExp.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
 #include <GProp_GProps.hxx>
 #include <GProp_PrincipalProps.hxx>
 #include <Precision.hxx>
@@ -30,6 +34,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <functional>
 
 namespace argos {
 
@@ -556,6 +561,105 @@ std::string to_json(const MassProperties& m, int indent)
         { "ixy", m.ixy }, { "ixz", m.ixz }, { "iyz", m.iyz }
     };
     j["principal_moments_kg_m2"] = { m.i1, m.i2, m.i3 };
+    return j.dump(indent, ' ', false, onBadUtf8);
+}
+
+DigestResult digest(const TopoDS_Shape& shape, double densityKgPerM3)
+{
+    DigestResult d;
+    if (shape.IsNull()) {
+        d.error = "null shape";
+        return d;
+    }
+
+    try {
+        auto countOf = [&](TopAbs_ShapeEnum t) {
+            TopTools_IndexedMapOfShape map;
+            TopExp::MapShapes(shape, t, map);
+            return map.Extent();
+        };
+        d.solids = countOf(TopAbs_SOLID);
+        d.faces = countOf(TopAbs_FACE);
+        d.edges = countOf(TopAbs_EDGE);
+        d.vertices = countOf(TopAbs_VERTEX);
+
+        // Overall bounding box
+        Bnd_Box box;
+        BRepBndLib::Add(shape, box);
+        if (!box.IsVoid()) {
+            double xmin, ymin, zmin, xmax, ymax, zmax;
+            box.Get(xmin, ymin, zmin, xmax, ymax, zmax);
+            d.bboxMin = Vec3{ xmin, ymin, zmin };
+            d.bboxMax = Vec3{ xmax, ymax, zmax };
+            d.bboxSize = Vec3{ xmax - xmin, ymax - ymin, zmax - zmin };
+        }
+
+        // Mass properties (best-effort; ok==false if not a solid)
+        d.mass = massProperties(shape, densityKgPerM3);
+
+        // Distinct cylindrical-face diameters
+        TopTools_IndexedMapOfShape faceMap;
+        TopExp::MapShapes(shape, TopAbs_FACE, faceMap);
+        std::vector<double> diam;
+        for (int i = 1; i <= faceMap.Extent(); ++i) {
+            try {
+                BRepAdaptor_Surface surf(TopoDS::Face(faceMap(i)));
+                if (surf.GetType() == GeomAbs_Cylinder) {
+                    const double dia = 2.0 * surf.Cylinder().Radius();
+                    if (std::isfinite(dia) && dia > 1.0e-6)
+                        diam.push_back(dia);
+                }
+            }
+            catch (...) { /* skip non-analytic faces */ }
+        }
+        // Dedup (round to 0.01 mm) and sort descending
+        std::sort(diam.begin(), diam.end(), std::greater<double>());
+        for (double v : diam) {
+            const bool dup = !d.cylinderDiametersMm.empty()
+                && std::abs(d.cylinderDiametersMm.back() - v) < 0.01;
+            if (!dup)
+                d.cylinderDiametersMm.push_back(v);
+        }
+
+        d.ok = true;
+    }
+    catch (const Standard_Failure& e) {
+        d.error = e.GetMessageString() ? e.GetMessageString() : "OpenCASCADE failure";
+    }
+    catch (...) {
+        d.error = "unknown error computing digest";
+    }
+
+    return d;
+}
+
+std::string to_json(const DigestResult& d, int indent)
+{
+    const auto onBadUtf8 = nlohmann::ordered_json::error_handler_t::replace;
+    nlohmann::ordered_json j;
+    j["ok"] = d.ok;
+    if (!d.ok) {
+        j["error"] = d.error;
+        return j.dump(indent, ' ', false, onBadUtf8);
+    }
+
+    j["counts"] = {
+        { "solids", d.solids }, { "faces", d.faces },
+        { "edges", d.edges }, { "vertices", d.vertices }
+    };
+    auto vecObj = [](const Vec3& v) {
+        return nlohmann::ordered_json{ { "x", v.x }, { "y", v.y }, { "z", v.z } };
+    };
+    if (d.bboxSize) {
+        j["bboxMin"] = vecObj(*d.bboxMin);
+        j["bboxMax"] = vecObj(*d.bboxMax);
+        j["bboxSize"] = vecObj(*d.bboxSize);
+    }
+    // Embed mass properties JSON inline
+    try { j["mass"] = nlohmann::ordered_json::parse(to_json(d.mass)); }
+    catch (...) {}
+    j["cylinderDiametersMm"] = d.cylinderDiametersMm;
+
     return j.dump(indent, ' ', false, onBadUtf8);
 }
 

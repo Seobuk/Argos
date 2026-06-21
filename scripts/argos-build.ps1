@@ -41,13 +41,15 @@ Write-Host "== Configuring Argos ==" -ForegroundColor Cyan
     -DVCPKG_TARGET_TRIPLET=x64-windows `
     "-DCMAKE_PREFIX_PATH=$QtDir" `
     -DMayo_PostBuildCopyRuntimeDLLs=OFF `
-    -DMayo_BuildConvCli=OFF `
+    -DMayo_BuildConvCli=ON `
     ("-DArgos_BuildCoreTests=" + ($(if ($Tests) { 'ON' } else { 'ON' }))) `
     -DMayo_BuildTests=OFF
 if ($LASTEXITCODE -ne 0) { throw "configure failed ($LASTEXITCODE)" }
 
-Write-Host "== Building (mayo + argos-cli + argos_core_test) ==" -ForegroundColor Cyan
-& $cmake --build $build --config $Config --target mayo argos-cli argos_core_test --parallel
+# mayo-conv is the headless offscreen renderer used by scripts/argos_report.py to
+# put 3D view images into the measurement report.
+Write-Host "== Building (mayo + argos-cli + mayo-conv + argos_core_test) ==" -ForegroundColor Cyan
+& $cmake --build $build --config $Config --target mayo argos-cli mayo-conv argos_core_test --parallel
 if ($LASTEXITCODE -ne 0) { throw "build failed ($LASTEXITCODE)" }
 
 if ($Tests) {

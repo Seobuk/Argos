@@ -38,6 +38,10 @@ Copy-Item (Join-Path $rel 'mayo.exe') (Join-Path $dist 'Argos.exe') -Force
 if (Test-Path (Join-Path $rel 'argos-cli.exe')) {
     Copy-Item (Join-Path $rel 'argos-cli.exe') $dist -Force
 }
+# mayo-conv.exe: headless offscreen renderer used by the PPTX report generator.
+if (Test-Path (Join-Path $rel 'mayo-conv.exe')) {
+    Copy-Item (Join-Path $rel 'mayo-conv.exe') $dist -Force
+}
 
 # Ensure Qt is deployed next to Argos.exe (idempotent). windeployqt prints
 # harmless warnings (e.g. missing dxcompiler.dll) to stderr; don't let those abort
