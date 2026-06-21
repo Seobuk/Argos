@@ -70,14 +70,27 @@ argos-cli props part.step --density 2700
 # URDF <inertial> 블록으로 출력 (로봇 링크에 바로 붙여넣기)
 argos-cli props part.step --urdf
 
-# 모델 요약
+# 모델 요약 / 한 번에 요약(치수·질량·지름)
 argos-cli info part.step
+argos-cli digest part.step --pretty
 ```
 
-> 🤖 **휴머노이드용 질량·관성**: `props`는 부피·무게중심·**관성텐서(COM 기준)**·
-> 주관성모멘트를 SI 단위(kg, kg·m²)로 계산해 URDF `<inertial>`로 내보냅니다.
-> STEP을 받아 자동으로 측정 **보고서(PowerPoint)**를 만드는 기능은
-> `feature/step-report` 브랜치에서 개발 중입니다(예시 포함).
+### 📑 STEP 측정 보고서 (PowerPoint 자동 생성)
+STEP을 넣으면 폴더를 만들고 **사진·치수 중심의 PowerPoint 보고서**를 자동 생성합니다 —
+가로·세로·높이, **여러 각도(등각) 사진**, 각 뷰 이미지에 치수가 그려진 **치수 도면**.
+3D 이미지는 `mayo-conv`로 **완전 오프스크린 렌더링**(창이 뜨지 않아 작업 중에도 OK)됩니다.
+
+```powershell
+pip install python-pptx pillow
+py -3.12 scripts/argos_report.py part.step --out part_report
+# 질량·관성·URDF 슬라이드까지: --with-mass
+```
+
+예시는 [examples/planetary_gear](examples/planetary_gear) (실제 유성기어 보고서 포함).
+
+> 🤖 **휴머노이드용 질량·관성**: `props`(또는 보고서 `--with-mass`)는 부피·무게중심·
+> **관성텐서(COM 기준)**·주관성모멘트를 SI 단위(kg, kg·m²)로 계산해 URDF
+> `<inertial>`로 내보냅니다.
 
 ## 🔨 빌드 (Windows)
 

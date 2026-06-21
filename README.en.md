@@ -70,15 +70,28 @@ argos-cli props part.step --density 2700
 # emit a ROS/URDF <inertial> block (paste straight into a robot link)
 argos-cli props part.step --urdf
 
-# model summary
+# model summary / one-shot digest (dimensions, mass, diameters)
 argos-cli info part.step
+argos-cli digest part.step --pretty
 ```
 
-> 🤖 **Mass & inertia for humanoids**: `props` computes volume, centre of mass,
-> the **inertia tensor about the COM** and principal moments in SI units
-> (kg, kg·m²) and exports a URDF `<inertial>` block. An auto **PowerPoint
-> measurement report** from a STEP file is in progress on the
-> `feature/step-report` branch (with an example).
+### 📑 STEP measurement report (auto PowerPoint)
+Drop in a STEP and Argos builds a folder with a **photo + dimension report**:
+overall width/length/height, **multi-angle (isometric) photos**, and a
+**dimensioned drawing** with the size drawn right on each view. The 3D images are
+rendered **fully offscreen** via `mayo-conv` — no window pops up.
+
+```powershell
+pip install python-pptx pillow
+py -3.12 scripts/argos_report.py part.step --out part_report
+# add the mass / inertia / URDF slides too: --with-mass
+```
+
+See [examples/planetary_gear](examples/planetary_gear) for a real report.
+
+> 🤖 **Mass & inertia for humanoids**: `props` (or the report with `--with-mass`)
+> computes volume, centre of mass, the **inertia tensor about the COM** and
+> principal moments in SI units (kg, kg·m²) and exports a URDF `<inertial>` block.
 
 ## 🔨 Build (Windows)
 
