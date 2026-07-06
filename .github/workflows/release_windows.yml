@@ -11,6 +11,11 @@ on:
     push:
         tags:
             - 'v*'
+        # Build (but don't publish) the package on every push to the feature branch
+        # so the Release configuration is validated and an Argos-win64.zip artifact
+        # is available for download from the run.
+        branches:
+            - 'claude/height-measure-multi-tabs-3nqnyb'
     workflow_dispatch:
         inputs:
             release_tag:

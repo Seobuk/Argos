@@ -5,6 +5,10 @@ on: [push]
 jobs:
     build-windows:
         strategy:
+            # Don't let one broken matrix entry (the PCH configs have a pre-existing
+            # 'QtGui/QShortcut' include failure) cancel the other configs — we want
+            # each config's real pass/fail signal.
+            fail-fast: false
             matrix:
                 occ_version: [7.3.0, 7.4.0, 7.5.0, 7.6.0, 7.7.0, 7.8.0, 7.9.0]
                 assimp_version: [6.0.5]
