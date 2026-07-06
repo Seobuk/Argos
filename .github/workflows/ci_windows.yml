@@ -5,12 +5,15 @@ on: [push]
 jobs:
     build-windows:
         strategy:
-            # Don't let one broken matrix entry (the PCH configs have a pre-existing
-            # 'QtGui/QShortcut' include failure) cancel the other configs — we want
-            # each config's real pass/fail signal.
+            # Don't let one broken matrix entry cancel the others — we want each
+            # config's real pass/fail signal.
             fail-fast: false
             matrix:
-                occ_version: [7.3.0, 7.4.0, 7.5.0, 7.6.0, 7.7.0, 7.8.0, 7.9.0]
+                # OpenCASCADE 7.3.0 / 7.4.0 are dropped: their bundled header
+                # OpenGl_HaltonSampler.hxx calls std::random_shuffle, which was
+                # removed in C++17, so they cannot build with a modern MSVC C++17
+                # toolchain. The project targets OCCT 7.9.0 (see vcpkg.json).
+                occ_version: [7.5.0, 7.6.0, 7.7.0, 7.8.0, 7.9.0]
                 assimp_version: [6.0.5]
                 pch: [OFF]
                 include:
