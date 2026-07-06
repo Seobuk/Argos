@@ -21,6 +21,7 @@
 #include "widget_occ_view_controller.h"
 #include "qtwidgets_utils.h"
 
+#include <QtGui/QCursor>
 #include <QtGui/QPainter>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QShortcut>
@@ -152,6 +153,11 @@ WidgetGuiDocument::WidgetGuiDocument(GuiDocument* guiDoc, QWidget* parent)
         if (btn == Aspect_VKeyMouse_LeftButton && !m_guiDoc->processAction(gfxScene->currentHighlightedOwner())) {
             gfxScene->select();
             m_qtOccView->redraw();
+        }
+        // Argos: right-click (without dragging) pops up the standard-view menu so
+        // the user can snap the current view to 정면/윗면/… .
+        else if (btn == Aspect_VKeyMouse_RightButton) {
+            this->popupViewOrientationMenu(QCursor::pos());
         }
     });
     m_controller->signalMultiSelectionToggled.connectSlot([=](bool on) {
@@ -417,6 +423,40 @@ void WidgetGuiDocument::createMenuViewProjections(QWidget* container)
             m_guiDoc->setViewCameraOrientation(orientation, GuiDocument::ViewOrientationFlag_FitAll);
         }
     });
+}
+
+void WidgetGuiDocument::popupViewOrientationMenu(const QPoint& globalPos)
+{
+    struct OrientationData {
+        V3d_TypeOfOrientation proj;
+        Theme::Icon icon;
+        QString text;
+    };
+    const OrientationData items[] = {
+        { V3d_Yneg, Theme::Icon::View3dFront,  tr("정면 (Front)") },
+        { V3d_Ypos, Theme::Icon::View3dBack,   tr("후면 (Back)") },
+        { V3d_Xneg, Theme::Icon::View3dLeft,   tr("좌측 (Left)") },
+        { V3d_Xpos, Theme::Icon::View3dRight,  tr("우측 (Right)") },
+        { V3d_Zpos, Theme::Icon::View3dTop,    tr("윗면 (Top)") },
+        { V3d_Zneg, Theme::Icon::View3dBottom, tr("아랫면 (Bottom)") },
+        { V3d_XposYnegZpos, Theme::Icon::View3dIso, tr("등각 (Isometric)") }
+    };
+
+    auto menu = this->createViewMenu(this);
+    menu->setTitle(tr("보는 면 바꾸기"));
+    auto header = menu->addAction(tr("보는 면 바꾸기"));
+    header->setEnabled(false);
+    menu->addSeparator();
+    for (const OrientationData& it : items) {
+        auto action = menu->addAction(mayoTheme()->icon(it.icon), it.text);
+        const V3d_TypeOfOrientation proj = it.proj;
+        QObject::connect(action, &QAction::triggered, this, [=]{
+            m_guiDoc->setViewCameraOrientation(proj, GuiDocument::ViewOrientationFlag_FitAll);
+        });
+    }
+
+    menu->setAttribute(Qt::WA_DeleteOnClose);
+    menu->popup(globalPos);
 }
 
 void WidgetGuiDocument::createMenuItemVisibility(QWidget* container)

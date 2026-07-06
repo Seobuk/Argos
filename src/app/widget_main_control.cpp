@@ -31,10 +31,13 @@
 #include "widget_properties_editor.h"
 
 #include <QtDebug>
+#include <QtCore/QAbstractItemModel>
 #include <QtCore/QDir>
+#include <QtCore/QSignalBlocker>
 #include <QtCore/QTimer>
 #include <QtWidgets/QMenu>
 #include <QtWidgets/QMessageBox>
+#include <QtWidgets/QTabBar>
 
 #include <algorithm>
 #include <cassert>
@@ -142,6 +145,9 @@ WidgetMainControl::WidgetMainControl(GuiApplication* guiApp, QWidget* parent)
     this->onLeftContentsPageChanged(m_ui->stack_LeftContents->currentIndex());
     m_ui->widget_MouseCoords->hide();
     this->setWidgetLeftSideBarWidthFactor(0.25);
+
+    // Argos: document tabs above the 3D view (replaces the document selector combo)
+    this->setupDocumentTabs();
 
     this->onCurrentDocumentIndexChanged(-1);
 }
@@ -438,6 +444,92 @@ QWidget* WidgetMainControl::recreateLeftHeaderPlaceHolder()
     return placeHolder;
 }
 
+void WidgetMainControl::setupDocumentTabs()
+{
+    m_tabBarDocuments = new QTabBar(m_ui->widget_Right);
+    m_tabBarDocuments->setObjectName("argosDocumentTabs");
+    m_tabBarDocuments->setTabsClosable(true);
+    m_tabBarDocuments->setMovable(false); // keep tab index == document index
+    m_tabBarDocuments->setExpanding(false);
+    m_tabBarDocuments->setDocumentMode(true);
+    m_tabBarDocuments->setUsesScrollButtons(true);
+    m_tabBarDocuments->setElideMode(Qt::ElideRight);
+    m_tabBarDocuments->setDrawBase(false);
+    m_tabBarDocuments->hide(); // shown once there is at least one document
+
+    // Place the tab strip right above the 3D view stack (verticalLayout holds the
+    // control row at index 0 and stack_GuiDocuments after it).
+    m_ui->verticalLayout->insertWidget(1, m_tabBarDocuments);
+
+    // The tabs replace the (now redundant) document selector combo and its nav
+    // buttons; hide them to keep a clean "tabs on top" look. currentDocumentIndex()
+    // still reads/writes combo_GuiDocuments, which keeps working while hidden.
+    for (QWidget* w : {
+             static_cast<QWidget*>(m_ui->btn_PreviousGuiDocument),
+             static_cast<QWidget*>(m_ui->btn_NextGuiDocument),
+             static_cast<QWidget*>(m_ui->combo_GuiDocuments),
+             static_cast<QWidget*>(m_ui->btn_CloseGuiDocument),
+             static_cast<QWidget*>(m_ui->line),
+             static_cast<QWidget*>(m_ui->line_2) }) {
+        w->hide();
+    }
+
+    QAbstractItemModel* model = m_ui->combo_GuiDocuments->model();
+
+    auto fnRebuildTabs = [this, model] {
+        QSignalBlocker block(m_tabBarDocuments);
+        while (m_tabBarDocuments->count() > 0)
+            m_tabBarDocuments->removeTab(0);
+
+        const int n = model->rowCount();
+        for (int i = 0; i < n; ++i) {
+            const QModelIndex idx = model->index(i, 0);
+            m_tabBarDocuments->addTab(idx.data(Qt::DisplayRole).toString());
+            m_tabBarDocuments->setTabToolTip(i, idx.data(Qt::ToolTipRole).toString());
+        }
+
+        m_tabBarDocuments->setVisible(n > 0);
+        m_tabBarDocuments->setCurrentIndex(this->currentDocumentIndex());
+    };
+
+    // Document add/remove -> rebuild the tab list (document counts are small, so a
+    // full rebuild is both cheap and robust against edge cases).
+    QObject::connect(model, &QAbstractItemModel::rowsInserted, this,
+                     [=](const QModelIndex&, int, int) { fnRebuildTabs(); });
+    QObject::connect(model, &QAbstractItemModel::rowsRemoved, this,
+                     [=](const QModelIndex&, int, int) { fnRebuildTabs(); });
+    QObject::connect(model, &QAbstractItemModel::modelReset, this,
+                     [=] { fnRebuildTabs(); });
+    QObject::connect(model, &QAbstractItemModel::dataChanged, this,
+                     [this, model](const QModelIndex& topLeft, const QModelIndex& bottomRight) {
+        for (int i = topLeft.row(); i <= bottomRight.row() && i < m_tabBarDocuments->count(); ++i) {
+            const QModelIndex idx = model->index(i, 0);
+            m_tabBarDocuments->setTabText(i, idx.data(Qt::DisplayRole).toString());
+            m_tabBarDocuments->setTabToolTip(i, idx.data(Qt::ToolTipRole).toString());
+        }
+    });
+
+    // Tab click -> switch current document (guarded so programmatic syncs don't loop).
+    QObject::connect(m_tabBarDocuments, &QTabBar::currentChanged, this, [this](int index) {
+        if (m_syncingDocumentTabs || index < 0)
+            return;
+
+        this->setCurrentDocumentIndex(index);
+    });
+    // Tab close button -> close that document.
+    QObject::connect(m_tabBarDocuments, &QTabBar::tabCloseRequested,
+                     this, &WidgetMainControl::onDocumentTabCloseRequested);
+
+    fnRebuildTabs();
+}
+
+void WidgetMainControl::onDocumentTabCloseRequested(int index)
+{
+    WidgetGuiDocument* widgetDoc = this->widgetGuiDocument(index);
+    if (widgetDoc && m_appContext)
+        FileCommandTools::closeDocument(m_appContext, widgetDoc->documentIdentifier());
+}
+
 void WidgetMainControl::reloadDocumentAfterChange(const DocumentPtr& doc)
 {
     // Helper function to reload document
@@ -607,6 +699,12 @@ void WidgetMainControl::onCurrentDocumentIndexChanged(int idx)
     m_ui->stack_GuiDocuments->setCurrentIndex(idx);
     QAbstractItemView* view = m_ui->listView_OpenedDocuments;
     view->setCurrentIndex(view->model()->index(idx, 0));
+
+    // Argos: keep the document tab strip in sync with the current document.
+    if (m_tabBarDocuments) {
+        QSignalBlocker block(m_tabBarDocuments);
+        m_tabBarDocuments->setCurrentIndex(idx);
+    }
 
     emit this->updateGlobalControlsActivationRequired();
 

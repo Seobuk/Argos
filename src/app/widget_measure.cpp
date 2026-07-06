@@ -16,13 +16,16 @@
 #include "../argos_core/measure.h"
 
 #include <AIS_Shape.hxx>
+#include <Bnd_Box.hxx>
 #include <Standard_Failure.hxx>
 #include <Standard_Version.hxx>
 #include <StdSelect_BRepOwner.hxx>
 #include <TopLoc_Location.hxx>
 #include <TopoDS_Shape.hxx>
+#include <gp_Pnt.hxx>
 #include <gp_Trsf.hxx>
 
+#include <QtCore/QSignalBlocker>
 #include <QtCore/QString>
 #include <QtCore/QtDebug>
 #include <QtGui/QAction>
@@ -234,7 +237,14 @@ std::vector<std::pair<QString, QString>> secondaryRows(const argos::MeasureResul
         if (r.length) rows.emplace_back(QStringLiteral("둘레"), num(*r.length) + " mm");
         break;
     case K::BoundingBox:
-        if (r.value)  rows.emplace_back(QStringLiteral("부피"), num(*r.value) + " mm³");
+        if (r.bboxSize) {
+            rows.emplace_back(QStringLiteral("가로 (X)"), num(r.bboxSize->x) + " mm");
+            rows.emplace_back(QStringLiteral("세로 (Y)"), num(r.bboxSize->y) + " mm");
+            rows.emplace_back(QStringLiteral("높이 (Z, 최고−최저)"), num(r.bboxSize->z) + " mm");
+        }
+        if (r.bboxMax) rows.emplace_back(QStringLiteral("제일 높은 곳 (Z)"), num(r.bboxMax->z) + " mm");
+        if (r.bboxMin) rows.emplace_back(QStringLiteral("제일 낮은 곳 (Z)"), num(r.bboxMin->z) + " mm");
+        if (r.value)   rows.emplace_back(QStringLiteral("부피"), num(*r.value) + " mm³");
         break;
     default:
         break;
@@ -335,6 +345,22 @@ WidgetMeasure::WidgetMeasure(GuiDocument* guiDoc, QWidget* parent)
     m_checkShowXyz->setChecked(true);
     m_checkPointToPoint = new QCheckBox(tr("점-점 거리"), this);
 
+    // Argos: sub-shape selection filter (점/선/면). All ON reproduces the previous
+    // behaviour; turning off 점/선 makes faces far easier to click (and vice-versa),
+    // which directly addresses "선/면 선택이 잘 안 된다".
+    m_checkSelVertex = new QCheckBox(tr("점"), this);
+    m_checkSelVertex->setChecked(true);
+    m_checkSelVertex->setToolTip(tr("꼭짓점 선택 허용"));
+    m_checkSelEdge = new QCheckBox(tr("선"), this);
+    m_checkSelEdge->setChecked(true);
+    m_checkSelEdge->setToolTip(tr("모서리 선택 허용"));
+    m_checkSelFace = new QCheckBox(tr("면"), this);
+    m_checkSelFace->setChecked(true);
+    m_checkSelFace->setToolTip(tr("면 선택 허용"));
+
+    auto btnOverallSize = new QPushButton(tr("전체 크기 측정 (최고·최저 높이)"), this);
+    btnOverallSize->setToolTip(tr("지금 보이는 모델 전체의 가로·세로·높이와 제일 높은 곳/제일 낮은 곳을 한 번에 측정합니다"));
+
     auto btnClearSel = new QPushButton(tr("선택 해제"), this);
     btnClearSel->setToolTip(tr("현재 선택을 비웁니다 (Esc)"));
     auto btnCopyValue = new QPushButton(tr("값 복사"), this);
@@ -347,12 +373,25 @@ WidgetMeasure::WidgetMeasure(GuiDocument* guiDoc, QWidget* parent)
     optionLayout->setContentsMargins(0, 0, 0, 0);
     optionLayout->setSpacing(4);
     {
+        auto filterRow = new QHBoxLayout;
+        filterRow->setContentsMargins(0, 0, 0, 0);
+        auto filterLabel = new QLabel(tr("선택 대상:"), this);
+        filterLabel->setStyleSheet("color: rgba(140,140,140,230);");
+        filterRow->addWidget(filterLabel);
+        filterRow->addWidget(m_checkSelVertex);
+        filterRow->addWidget(m_checkSelEdge);
+        filterRow->addWidget(m_checkSelFace);
+        filterRow->addStretch(1);
+        optionLayout->addLayout(filterRow);
+
         auto checkRow = new QHBoxLayout;
         checkRow->setContentsMargins(0, 0, 0, 0);
         checkRow->addWidget(m_checkShowXyz);
         checkRow->addWidget(m_checkPointToPoint);
         checkRow->addStretch(1);
         optionLayout->addLayout(checkRow);
+
+        optionLayout->addWidget(btnOverallSize);
 
         auto actionRow = new QHBoxLayout;
         actionRow->setContentsMargins(0, 0, 0, 0);
@@ -363,6 +402,25 @@ WidgetMeasure::WidgetMeasure(GuiDocument* guiDoc, QWidget* parent)
         optionLayout->addLayout(actionRow);
     }
     m_ui->layout_Main->addWidget(optionRow, 5, 0, 1, 2);
+
+    // Selection-filter toggles: re-apply the enabled modes live. Guard against a
+    // state where nothing is selectable by forcing the just-toggled box back on.
+    auto onFilterToggled = [this](QCheckBox* justToggled) {
+        if (!m_checkSelVertex->isChecked() && !m_checkSelEdge->isChecked()
+                && !m_checkSelFace->isChecked()) {
+            QSignalBlocker block(justToggled);
+            justToggled->setChecked(true);
+        }
+        this->applySelectionModes();
+    };
+    QObject::connect(m_checkSelVertex, &QCheckBox::toggled, this,
+                     [=]{ onFilterToggled(m_checkSelVertex); });
+    QObject::connect(m_checkSelEdge, &QCheckBox::toggled, this,
+                     [=]{ onFilterToggled(m_checkSelEdge); });
+    QObject::connect(m_checkSelFace, &QCheckBox::toggled, this,
+                     [=]{ onFilterToggled(m_checkSelFace); });
+    QObject::connect(btnOverallSize, &QPushButton::clicked, this,
+                     [this]{ this->measureOverallSize(); });
 
     // History header: "측정 이력" + a "모두 지우기" button on the right (design).
     auto historyHeader = new QWidget(this);
@@ -446,17 +504,11 @@ void WidgetMeasure::setMeasureOn(bool on)
 
         m_tool = getMeasureTools().front().get();
 
-        // SolidWorks-style: activate vertex + edge + face selection modes at once
-        // so the user can mix-click sub-shapes without switching tool modes.
+        // SolidWorks-style: activate the sub-shape selection modes enabled by the
+        // 점/선/면 filter (default all three) so the user can mix-click sub-shapes
+        // without switching tool modes.
         gfxScene->clearSelection();
-        gfxScene->foreachDisplayedObject([&](const GraphicsObjectPtr& gfxObject) {
-            if (GuiDocument::isAisViewCubeObject(gfxObject))
-                return;
-
-            gfxScene->deactivateObjectSelection(gfxObject);
-            for (TopAbs_ShapeEnum t : { TopAbs_VERTEX, TopAbs_EDGE, TopAbs_FACE })
-                gfxScene->activateObjectSelection(gfxObject, AIS_Shape::SelectionMode(t));
-        });
+        this->applySelectionModes();
         gfxScene->redraw();
 
         m_connGraphicsSelectionChanged = gfxScene->signalSelectionChanged.connectSlot(
@@ -756,15 +808,132 @@ void WidgetMeasure::recompute(bool addToHistory)
 
 void WidgetMeasure::onDocumentEntityAdded(TreeNodeId entityNodeId)
 {
-    // Keep newly added entities measurable: activate vertex/edge/face modes.
+    // Keep newly added entities measurable: activate the currently enabled
+    // vertex/edge/face selection modes.
     auto gfxScene = m_guiDoc->graphicsScene();
+    const std::vector<int> modes = this->activeSelectionModes();
     m_guiDoc->foreachGraphicsObject(entityNodeId, [=](const GraphicsObjectPtr& gfxObject) {
         if (GuiDocument::isAisViewCubeObject(gfxObject))
             return;
 
-        for (TopAbs_ShapeEnum t : { TopAbs_VERTEX, TopAbs_EDGE, TopAbs_FACE })
-            gfxScene->activateObjectSelection(gfxObject, AIS_Shape::SelectionMode(t));
+        for (int mode : modes)
+            gfxScene->activateObjectSelection(gfxObject, mode);
     });
+}
+
+std::vector<int> WidgetMeasure::activeSelectionModes() const
+{
+    std::vector<int> modes;
+    // Default to all three when the checkboxes have not been created yet.
+    const bool selV = !m_checkSelVertex || m_checkSelVertex->isChecked();
+    const bool selE = !m_checkSelEdge   || m_checkSelEdge->isChecked();
+    const bool selF = !m_checkSelFace   || m_checkSelFace->isChecked();
+    if (selV) modes.push_back(AIS_Shape::SelectionMode(TopAbs_VERTEX));
+    if (selE) modes.push_back(AIS_Shape::SelectionMode(TopAbs_EDGE));
+    if (selF) modes.push_back(AIS_Shape::SelectionMode(TopAbs_FACE));
+    return modes;
+}
+
+void WidgetMeasure::applySelectionModes()
+{
+    auto gfxScene = m_guiDoc->graphicsScene();
+    const std::vector<int> modes = this->activeSelectionModes();
+    gfxScene->foreachDisplayedObject([&](const GraphicsObjectPtr& gfxObject) {
+        if (GuiDocument::isAisViewCubeObject(gfxObject))
+            return;
+
+        gfxScene->deactivateObjectSelection(gfxObject);
+        for (int mode : modes)
+            gfxScene->activateObjectSelection(gfxObject, mode);
+    });
+    gfxScene->redraw();
+}
+
+void WidgetMeasure::measureOverallSize()
+{
+    auto gfxScene = m_guiDoc->graphicsScene();
+
+    // Axis-aligned bounding box of the whole *visible* model (fall back to all
+    // graphics if nothing is flagged visible). The view cube is not part of this
+    // box (only entity graphics contribute to it).
+    Bnd_Box box = m_guiDoc->graphicsBoundingBox(GuiDocument::OnlyVisibleGraphics);
+    if (box.IsVoid())
+        box = m_guiDoc->graphicsBoundingBox(GuiDocument::AllGraphics);
+
+    // Reset the panel/selection state — this is a whole-model measurement, not a
+    // selection-set one.
+    this->clearAllMeasureDisplays();
+    gfxScene->clearSelection();
+    m_vecSelectedOwner.clear();
+    m_errorMessage.clear();
+    m_resultText.clear();
+    m_lastShort.clear();
+    m_lastJson.clear();
+    m_hasResult = false;
+
+    if (box.IsVoid()) {
+        m_errorMessage = tr("측정할 형상이 없습니다. 파일을 먼저 여세요.");
+        gfxScene->redraw();
+        this->updateMessagePanel();
+        return;
+    }
+
+    const gp_Pnt cmin = box.CornerMin();
+    const gp_Pnt cmax = box.CornerMax();
+    const double dx = std::abs(cmax.X() - cmin.X());
+    const double dy = std::abs(cmax.Y() - cmin.Y());
+    const double dz = std::abs(cmax.Z() - cmin.Z());
+
+    // Build a structured argos result so the value card, "값 복사" and "JSON 복사"
+    // all keep working with the same machinery as selection-based measurements.
+    auto toVec = [](const gp_Pnt& p) { return argos::Vec3{ p.X(), p.Y(), p.Z() }; };
+    argos::MeasureResult res;
+    res.ok = true;
+    res.kind = argos::MeasureKind::BoundingBox;
+    res.kindName = argos::toString(res.kind);
+    res.inputCount = 0;
+    res.bboxMin = toVec(cmin);
+    res.bboxMax = toVec(cmax);
+    res.bboxSize = argos::Vec3{ dx, dy, dz };
+    res.value = dx * dy * dz;
+    res.unit = "mm^3";
+
+    m_lastResult = res;
+    m_hasResult = true;
+    m_resultText = formatArgosResult(res);
+    m_lastShort = formatArgosShort(res);
+    m_lastJson = QString::fromStdString(argos::to_json(res));
+    if (m_historyList) {
+        const QString line = formatArgosShort(res);
+        const int n = m_historyList->count();
+        if (!line.isEmpty() && (n == 0 || m_historyList->item(n - 1)->text() != line))
+            m_historyList->addItem(line);
+    }
+
+    // On-screen callout: reuse the bounding-box display (translucent box + min/max
+    // points + per-axis dimension labels). Best-effort — never let it crash.
+    try {
+        MeasureBoundingBox bnd;
+        bnd.cornerMin = cmin;
+        bnd.cornerMax = cmax;
+        bnd.xLength = dx * Quantity_Millimeter;
+        bnd.yLength = dy * Quantity_Millimeter;
+        bnd.zLength = dz * Quantity_Millimeter;
+        bnd.volume = bnd.xLength * bnd.yLength * bnd.zLength;
+        auto disp = std::make_unique<MeasureDisplayBoundingBox>(bnd);
+        disp->update(this->currentMeasureDisplayConfig());
+        disp->adaptGraphics(gfxScene->v3dViewer()->Driver());
+        foreachGraphicsObject(disp.get(), [=](const GraphicsObjectPtr& gfxObject) {
+            gfxScene->addObject(gfxObject, GraphicsScene::AddObjectDisableSelectionMode);
+        });
+        m_vecMeasureDisplay.push_back(std::move(disp));
+    }
+    catch (...) {
+        // callout is a graphical aid only; the panel readout is authoritative
+    }
+
+    gfxScene->redraw();
+    this->updateMessagePanel();
 }
 
 void WidgetMeasure::updateMessagePanel()

@@ -16,6 +16,7 @@
 
 class QFileInfo;
 class QMenu;
+class QTabBar;
 
 namespace Mayo {
 
@@ -79,6 +80,11 @@ private:
     QWidget* findLeftHeaderPlaceHolder() const;
     QWidget* recreateLeftHeaderPlaceHolder();
 
+    // Argos: document tab bar shown above the 3D view. Mirrors the (hidden)
+    // document selector combo so opening several files lists them as tabs.
+    void setupDocumentTabs();
+    void onDocumentTabCloseRequested(int index);
+
     void reloadDocumentAfterChange(const DocumentPtr& doc);
 
     // Factor value must be in [0, 1]
@@ -88,6 +94,8 @@ private:
     GuiApplication* m_guiApp = nullptr;
     IAppContext* m_appContext = nullptr;
     ItemViewButtons* m_listViewBtns = nullptr;
+    QTabBar* m_tabBarDocuments = nullptr;   // Argos: document tabs above the 3D view
+    bool m_syncingDocumentTabs = false;     // Argos: reentrancy guard for tab<->combo sync
     std::vector<std::unique_ptr<PropertyGroup>> m_ptrCurrentNodeProperties;
     DocumentFilesWatcher* m_docFilesWatcher = nullptr;
     std::unordered_set<DocumentPtr> m_pendingDocsToReload;

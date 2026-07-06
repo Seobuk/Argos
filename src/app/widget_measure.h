@@ -56,10 +56,22 @@ private:
     void onGraphicsSelectionChanged();
     void onDocumentEntityAdded(TreeNodeId entityNodeId);
 
+    // Argos: sub-shape selection filter. Returns the OCCT selection modes enabled
+    // by the 점/선/면 toggles, so the user can restrict picking to just faces (or
+    // just edges) when overlapping vertices/edges make faces hard to click.
+    std::vector<int> activeSelectionModes() const;
+    // Re-apply activeSelectionModes() to every displayed object of the document.
+    void applySelectionModes();
+
     // Argos: (re)compute the measurement for the current selection set, applying
     // the Show-XYZ / Point-to-Point options. addToHistory appends the result to
     // the measurement-history list (only on a genuine selection change).
     void recompute(bool addToHistory);
+
+    // Argos: one-click measurement of the whole visible model's overall size —
+    // the axis-aligned bounding box giving width/depth/height plus the highest
+    // (max Z) and lowest (min Z) points, without needing any selection.
+    void measureOverallSize();
 
     void updateMessagePanel();
 
@@ -94,6 +106,9 @@ private:
     // Argos SolidWorks-style controls (created in code, see constructor)
     QCheckBox* m_checkShowXyz = nullptr;
     QCheckBox* m_checkPointToPoint = nullptr;
+    QCheckBox* m_checkSelVertex = nullptr;   // Argos: filter — allow picking vertices
+    QCheckBox* m_checkSelEdge = nullptr;     // Argos: filter — allow picking edges
+    QCheckBox* m_checkSelFace = nullptr;     // Argos: filter — allow picking faces
     QListWidget* m_historyList = nullptr;
     SignalConnectionHandle m_connGraphicsSelectionChanged;
     SignalConnectionHandle m_connDocumentEntityAdded;
