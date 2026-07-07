@@ -25,6 +25,7 @@
 #include <QtGui/QGuiApplication>
 #include <QtGui/QShortcut>
 #include <QtWidgets/QBoxLayout>
+#include <QtWidgets/QLabel>
 #include <QtWidgets/QMenu>
 #include <QtWidgets/QProxyStyle>
 #include <QtWidgets/QWidgetAction>
@@ -114,6 +115,26 @@ WidgetGuiDocument::WidgetGuiDocument(GuiDocument* guiDoc, QWidget* parent)
     layoutBtns->addWidget(m_btnSection);
     m_widgetBtns = this->createWidgetPanelContainer(widgetBtnsContents);
 
+    // Argos: always-on 3D mouse-coordinate readout, anchored at the bottom-right
+    // corner of the view (previously shown in the top document bar, hover-only).
+    {
+        auto coordsContents = new QWidget;
+        auto layoutCoords = new QHBoxLayout(coordsContents);
+        layoutCoords->setSpacing(0);
+        layoutCoords->setContentsMargins(QMargins{4, 1, 4, 1});
+
+        m_labelHoverMeasure = new QLabel(coordsContents);
+        m_labelHoverMeasure->setStyleSheet(QStringLiteral("color: palette(highlight); font-weight: 600;"));
+        layoutCoords->addWidget(m_labelHoverMeasure);
+        layoutCoords->addSpacing(18);
+
+        m_labelMouseCoords = new QLabel(coordsContents);
+        m_labelMouseCoords->setText(QStringLiteral("X=?  Y=?  Z=?"));
+        layoutCoords->addWidget(m_labelMouseCoords);
+
+        m_widgetMouseCoords = this->createWidgetPanelContainer(coordsContents);
+    }
+
     auto gfxScene = m_guiDoc->graphicsScene();
     gfxScene->signalRedrawRequested.connectSlot([=](const OccHandle<V3d_View>& view) {
         if (view == m_qtOccView->v3dView())
@@ -192,6 +213,7 @@ void WidgetGuiDocument::resizeEvent(QResizeEvent* event)
     QWidget::resizeEvent(event);
     this->layoutViewControls();
     this->layoutWidgetPanels();
+    this->layoutMouseCoords();
 }
 
 QWidget* WidgetGuiDocument::createWidgetPanelContainer(QWidget* widgetContents)
@@ -547,6 +569,33 @@ void WidgetGuiDocument::layoutViewControls()
     };
 
     m_widgetBtns->move(fnGetViewControlsPos());
+}
+
+void WidgetGuiDocument::layoutMouseCoords()
+{
+    if (!m_widgetMouseCoords)
+        return;
+
+    m_widgetMouseCoords->adjustSize();
+    const int margin = this->devicePixelRatio() * 2 * Internal_widgetMargin;
+    const QSize sz = m_widgetMouseCoords->frameSize();
+    m_widgetMouseCoords->move(this->width() - sz.width() - margin, this->height() - sz.height() - margin);
+    m_widgetMouseCoords->raise();
+}
+
+void WidgetGuiDocument::updateMouseCoords(double x, double y, double z, const QString& hoverText)
+{
+    if (!m_widgetMouseCoords)
+        return;
+
+    m_labelHoverMeasure->setText(hoverText);
+    m_labelMouseCoords->setText(
+        QStringLiteral("X=%1  Y=%2  Z=%3").arg(
+            QString::number(x, 'f', 3), QString::number(y, 'f', 3), QString::number(z, 'f', 3)
+        )
+    );
+    // Content width changes with the values/hover text, so re-anchor to the corner.
+    this->layoutMouseCoords();
 }
 
 } // namespace Mayo
