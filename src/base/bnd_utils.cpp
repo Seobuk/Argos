@@ -51,6 +51,16 @@ BndBoxCoords BndBoxCoords::get(const Bnd_Box& box)
 
 void BndUtils::add(Bnd_Box* box, const Bnd_Box& other)
 {
+    // A void 'other' carries no geometry: BndBoxCoords::get() returns all-zero
+    // coordinates for it, so adding its "vertices" would splat the world origin
+    // (0,0,0) into 'box' and inflate it. This happens whenever a visible graphics
+    // object has an empty/invalid presentation bounding box (non-geometric entity,
+    // not-yet-computed presentation, ...). Skip it so the accumulated box tracks
+    // only the real geometry — otherwise the overall-size box stretches from the
+    // model all the way to the origin.
+    if (other.IsVoid())
+        return;
+
     const auto bbc = BndBoxCoords::get(other);
     for (const gp_Pnt& pnt : bbc.vertices())
         box->Add(pnt);

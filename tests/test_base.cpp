@@ -11,6 +11,7 @@
 #include "test_base.h"
 
 #include "../src/base/application.h"
+#include "../src/base/bnd_utils.h"
 #include "../src/base/brep_utils.h"
 #include "../src/base/caf_utils.h"
 #include "../src/base/cpp_utils.h"
@@ -572,6 +573,38 @@ void TestBase::BRepUtils_test()
         QCOMPARE(BRepUtils::hashCode(shapeBase), BRepUtils::hashCode(shapeCopy));
         QVERIFY(BRepUtils::hashCode(shapeBase) != BRepUtils::hashCode(shapeOther));
     }
+}
+
+void TestBase::BndUtils_add_ignoresVoidBox_test()
+{
+    // A void box must contribute nothing. Previously BndUtils::add() splatted the
+    // world origin (0,0,0) for a void 'other' (BndBoxCoords::get() yields all-zero
+    // coords for it), which inflated the accumulated box — the root cause of the
+    // "전체 크기 측정" box stretching from a model offset from the origin all the
+    // way back to (0,0,0).
+
+    // Model sitting away from the origin, e.g. corner at (100,100,100).
+    Bnd_Box modelBox;
+    modelBox.Add(gp_Pnt(100, 100, 100));
+    modelBox.Add(gp_Pnt(190, 190, 110)); // 90 x 90 x 10, like the reported PCB
+
+    // Accumulate the model box + a void box (a visible non-geometric / empty entity).
+    Bnd_Box acc;
+    BndUtils::add(&acc, modelBox);
+    BndUtils::add(&acc, Bnd_Box{}); // void -> must be a no-op, NOT add the origin
+
+    const BndBoxCoords c = BndBoxCoords::get(acc);
+    // Box must still hug the model, not reach back to the origin.
+    QCOMPARE(c.xmin, 100.);
+    QCOMPARE(c.ymin, 100.);
+    QCOMPARE(c.zmin, 100.);
+    QCOMPARE(c.xmax, 190.);
+    QCOMPARE(c.ymax, 190.);
+    QCOMPARE(c.zmax, 110.);
+    // Sanity: dimensions are the real model size, not the origin-inflated size.
+    QCOMPARE(c.xmax - c.xmin, 90.);
+    QCOMPARE(c.ymax - c.ymin, 90.);
+    QCOMPARE(c.zmax - c.zmin, 10.);
 }
 
 void TestBase::CafUtils_labelTag_test()
