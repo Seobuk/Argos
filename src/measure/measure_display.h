@@ -31,6 +31,7 @@ struct MeasureDisplayConfig {
     VolumeUnit volumeUnit = VolumeUnit::CubicMillimeter;
     DoubleToStringOptions doubleToStringOptions;
     double devicePixelRatio = 1.;
+    bool showDeltaXyz = true; // Argos: also print ΔX/ΔY/ΔZ on the 3D distance callout
 };
 
 // Provides an interface to textual/graphics representation of a measure

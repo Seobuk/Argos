@@ -21,6 +21,11 @@ namespace argos {
 // Returns a null shape on failure; *error (if given) receives a message.
 TopoDS_Shape loadShape(const std::string& path, std::string* error = nullptr);
 
+// Write a shape to a STEP file (mm units). Returns false and sets *error on
+// failure. ponytail: plain STEPControl roundtrip, so colours / names /
+// assembly tree are dropped; switch to STEPCAFControl if those must survive.
+bool writeStep(const std::string& path, const TopoDS_Shape& shape, std::string* error = nullptr);
+
 // Number of sub-shapes of the given type, using the stable TopExp ordering.
 int countSubShapes(const TopoDS_Shape& shape, TopAbs_ShapeEnum type);
 

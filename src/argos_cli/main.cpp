@@ -19,6 +19,12 @@
 #include "../argos_core/section.h"
 #include "../3rdparty/nlohmann/json.hpp"
 
+#include <BRepBuilderAPI_Transform.hxx>
+#include <gp_Ax1.hxx>
+#include <gp_Dir.hxx>
+#include <gp_Pnt.hxx>
+#include <gp_Trsf.hxx>
+
 #include <cmath>
 #include <filesystem>
 #include <iostream>
@@ -46,7 +52,11 @@ void printUsage()
         "  argos-cli section <file> [--plane xy|yz|zx] [--offset N] [--flip] [options]\n"
         "  argos-cli props   <file> [--density N] [--urdf] [--pretty]\n"
         "  argos-cli digest  <file> [--density N] [--pretty]\n"
-        "  argos-cli info    <file> [--pretty]\n\n"
+        "  argos-cli info    <file> [--pretty]\n"
+        "  argos-cli reorient <file> -o <out.step> [--rx D] [--ry D] [--rz D]\n\n"
+        "reorient options (rotate about global axes through the origin, degrees):\n"
+        "  -o, --out <path>   output STEP file (required)\n"
+        "  --rx / --ry / --rz D   rotation about X / Y / Z (e.g. left face -> front: --rz 90)\n\n"
         "measure selection (order matters; mix freely, SolidWorks-style):\n"
         "  --vertex N      select the N-th vertex (1-based)\n"
         "  --edge   N      select the N-th edge\n"
@@ -336,6 +346,77 @@ int doDigest(const std::vector<std::string>& args)
     return dg.ok ? 0 : 1;
 }
 
+// Rotate a model about the global X/Y/Z axes (through the origin) and write the
+// result to a new STEP file. Used to fix parts whose "front" face is authored
+// pointing sideways (e.g. the view cube reads 좌측 instead of 정면).
+int doReorient(const std::vector<std::string>& args)
+{
+    std::string file, out;
+    double rx = 0, ry = 0, rz = 0;
+    int indent = -1;
+
+    for (size_t i = 2; i < args.size(); ++i) {
+        const std::string& a = args[i];
+        auto wantDeg = [&](double& dst) -> bool {
+            double d = 0;
+            if (i + 1 >= args.size() || !parseDouble(args[++i], d)) {
+                emitError("invalid angle after " + a, indent);
+                return false;
+            }
+            dst = d;
+            return true;
+        };
+
+        if (a == "--rx")                  { if (!wantDeg(rx)) return 1; }
+        else if (a == "--ry")             { if (!wantDeg(ry)) return 1; }
+        else if (a == "--rz")             { if (!wantDeg(rz)) return 1; }
+        else if (a == "-o" || a == "--out") {
+            if (i + 1 >= args.size()) return emitError("missing path after " + a, indent);
+            out = args[++i];
+        }
+        else if (a == "--pretty")         indent = 2;
+        else if (!a.empty() && a[0] == '-') return emitError("unknown option: " + a, indent);
+        else if (file.empty())            file = a;
+        else return emitError("unexpected argument: " + a, indent);
+    }
+
+    if (out.empty())
+        return emitError("missing output path (use -o <out.step>)", indent);
+
+    TopoDS_Shape shape;
+    if (!loadOrEmit(file, indent, shape))
+        return 1;
+
+    // Compose X, then Y, then Z rotations about axes through the origin.
+    const double d2r = std::acos(-1.0) / 180.0;
+    gp_Trsf t;
+    auto rot = [&](const gp_Dir& axis, double deg) {
+        if (deg != 0.0) {
+            gp_Trsf r;
+            r.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), axis), deg * d2r);
+            t = r * t;
+        }
+    };
+    rot(gp_Dir(1, 0, 0), rx);
+    rot(gp_Dir(0, 1, 0), ry);
+    rot(gp_Dir(0, 0, 1), rz);
+
+    const TopoDS_Shape moved = BRepBuilderAPI_Transform(shape, t, true).Shape();
+
+    std::string werr;
+    if (!argos::writeStep(out, moved, &werr))
+        return emitError(werr.empty() ? "failed to write STEP" : werr, indent);
+
+    nlohmann::ordered_json j;
+    j["ok"] = true;
+    j["input"] = file;
+    j["output"] = out;
+    j["rotation_deg"] = { {"x", rx}, {"y", ry}, {"z", rz} };
+    std::cout << j.dump(indent, ' ', false, nlohmann::ordered_json::error_handler_t::replace)
+              << std::endl;
+    return 0;
+}
+
 int runMain(const std::vector<std::string>& args)
 {
     if (args.size() < 2) {
@@ -354,6 +435,8 @@ int runMain(const std::vector<std::string>& args)
         return doProps(args);
     if (cmd == "digest")
         return doDigest(args);
+    if (cmd == "reorient")
+        return doReorient(args);
     if (cmd == "-h" || cmd == "--help" || cmd == "help") {
         printUsage();
         return 0;

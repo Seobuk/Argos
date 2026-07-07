@@ -324,7 +324,18 @@ void MeasureDisplayDistance::update(const MeasureDisplayConfig& config)
         ));
     }
 
-    m_gfxDistText->SetText(to_OccExtString(" " + strLength));
+    std::string gfxLabel = " " + strLength;
+    // Argos: mirror the panel's ΔX/ΔY/ΔZ readout on the 3D callout (ASCII "d" so it
+    // renders in the default 3D font; abs values match argos_core::fillDistance).
+    if (config.showDeltaXyz && this->sumCount() <= 1) {
+        const auto trDx = UnitSystem::translateLength(std::abs(m_dist.pnt2.X() - m_dist.pnt1.X()) * Quantity_Millimeter, config.lengthUnit);
+        const auto trDy = UnitSystem::translateLength(std::abs(m_dist.pnt2.Y() - m_dist.pnt1.Y()) * Quantity_Millimeter, config.lengthUnit);
+        const auto trDz = UnitSystem::translateLength(std::abs(m_dist.pnt2.Z() - m_dist.pnt1.Z()) * Quantity_Millimeter, config.lengthUnit);
+        gfxLabel += "\n dX " + BaseMeasureDisplay::text(trDx, config)
+                  + "   dY " + BaseMeasureDisplay::text(trDy, config)
+                  + "   dZ " + BaseMeasureDisplay::text(trDz, config);
+    }
+    m_gfxDistText->SetText(to_OccExtString(gfxLabel));
     BaseMeasureDisplay::adaptScale(m_gfxDistText, config);
 }
 

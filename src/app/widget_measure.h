@@ -11,12 +11,16 @@
 #include "../measure/measure_tool.h"
 #include "../argos_core/measure.h"
 
+#include <Bnd_Box.hxx>
+
 #include <QtWidgets/QWidget>
 #include <memory>
+#include <optional>
 #include <vector>
 
 class QCheckBox;
 class QListWidget;
+class QPushButton;
 
 namespace Mayo {
 
@@ -73,6 +77,11 @@ private:
     // (max Z) and lowest (min Z) points, without needing any selection.
     void measureOverallSize();
 
+    // Argos: UI-thread continuation of measureOverallSize() — takes the computed
+    // exact B-Rep box (void for mesh-only docs), caches it, applies the
+    // graphics-box fallback, then renders the result card and on-screen callout.
+    void applyOverallSizeResult(Bnd_Box box);
+
     void updateMessagePanel();
 
     using IMeasureDisplayPtr = std::unique_ptr<IMeasureDisplay>;
@@ -103,12 +112,19 @@ private:
     argos::MeasureResult m_lastResult;  // Argos: structured result driving the card panel
     bool m_hasResult = false;           // Argos: true when m_lastResult is valid
 
+    // Argos: exact overall bounding box, cached so the CPU-heavy exact-surface
+    // computation runs at most once per document (and off the UI thread). Reset
+    // in onDocumentEntityAdded() whenever the document's shapes change.
+    std::optional<Bnd_Box> m_overallBox;
+    bool m_overallBusy = false;         // an overall-size computation is in flight
+
     // Argos SolidWorks-style controls (created in code, see constructor)
     QCheckBox* m_checkShowXyz = nullptr;
     QCheckBox* m_checkPointToPoint = nullptr;
     QCheckBox* m_checkSelVertex = nullptr;   // Argos: filter — allow picking vertices
     QCheckBox* m_checkSelEdge = nullptr;     // Argos: filter — allow picking edges
     QCheckBox* m_checkSelFace = nullptr;     // Argos: filter — allow picking faces
+    QPushButton* m_btnOverallSize = nullptr;  // Argos: "전체 크기 측정" button (disabled while measuring)
     QListWidget* m_historyList = nullptr;
     SignalConnectionHandle m_connGraphicsSelectionChanged;
     SignalConnectionHandle m_connDocumentEntityAdded;

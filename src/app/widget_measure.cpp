@@ -28,8 +28,10 @@
 #include <gp_Pnt.hxx>
 #include <gp_Trsf.hxx>
 
+#include <QtCore/QPointer>
 #include <QtCore/QSignalBlocker>
 #include <QtCore/QString>
+#include <QtCore/QThreadPool>
 #include <QtCore/QtDebug>
 #include <QtGui/QAction>
 #include <QtGui/QClipboard>
@@ -37,6 +39,7 @@
 #include <QtGui/QFontDatabase>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QShortcut>
+#include <QtWidgets/QApplication>
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QFormLayout>
 #include <QtWidgets/QFrame>
@@ -363,6 +366,7 @@ WidgetMeasure::WidgetMeasure(GuiDocument* guiDoc, QWidget* parent)
 
     auto btnOverallSize = new QPushButton(tr("전체 크기 측정 (최고·최저 높이)"), this);
     btnOverallSize->setToolTip(tr("지금 보이는 모델 전체의 가로·세로·높이와 제일 높은 곳/제일 낮은 곳을 한 번에 측정합니다"));
+    m_btnOverallSize = btnOverallSize;
 
     auto btnClearSel = new QPushButton(tr("선택 해제"), this);
     btnClearSel->setToolTip(tr("현재 선택을 비웁니다 (Esc)"));
@@ -700,6 +704,7 @@ MeasureDisplayConfig WidgetMeasure::currentMeasureDisplayConfig() const
     cfg.doubleToStringOptions.locale = AppModule::get()->stdLocale();
     cfg.doubleToStringOptions.decimalCount = AppModule::get()->defaultTextOptions().unitDecimals;
     cfg.devicePixelRatio = this->devicePixelRatioF();
+    cfg.showDeltaXyz = !m_checkShowXyz || m_checkShowXyz->isChecked();
     return cfg;
 }
 
@@ -822,6 +827,10 @@ void WidgetMeasure::onDocumentEntityAdded(TreeNodeId entityNodeId)
         for (int mode : modes)
             gfxScene->activateObjectSelection(gfxObject, mode);
     });
+
+    // The model changed — drop the cached overall bounding box so the next
+    // "전체 크기 측정" recomputes it.
+    m_overallBox.reset();
 }
 
 std::vector<int> WidgetMeasure::activeSelectionModes() const
@@ -854,23 +863,79 @@ void WidgetMeasure::applySelectionModes()
 
 void WidgetMeasure::measureOverallSize()
 {
-    auto gfxScene = m_guiDoc->graphicsScene();
+    // Already computing — ignore repeat clicks so we never stack parallel
+    // exact-surface passes (each one is CPU-heavy).
+    if (m_overallBusy)
+        return;
 
-    // Axis-aligned bounding box of the real B-Rep geometry — NOT the graphics
-    // (tessellation) box. useTriangulation=false forces exact-surface extents;
-    // with triangulation the box is padded by the display deflection (~0.4 mm
-    // here), so a Ø88 part read 88.43. false gives the true geometric size,
-    // deflection-independent. ponytail: exact-surface AddOptimal is O(faces) —
-    // fine for a one-shot button.
-    Bnd_Box box;
+    // Cache hit: the model hasn't changed since the last measure, so reuse the
+    // exact box — no recompute, no CPU spike, instant readout. Invalidated in
+    // onDocumentEntityAdded() whenever the document's shapes change.
+    if (m_overallBox) {
+        this->applyOverallSizeResult(*m_overallBox);
+        return;
+    }
+
+    // Snapshot the top-level B-Rep shapes on the UI thread (TopoDS_Shape is a
+    // handle, so this is a cheap shallow copy), then run the heavy exact-surface
+    // AddOptimal off the UI thread so the app never freezes on a big STEP.
+    // useTriangulation=false is deliberate: it gives the true geometric size
+    // (a Ø88 part reads 88.00, not the deflection-padded 88.43).
+    std::vector<TopoDS_Shape> shapes;
     const DocumentPtr& doc = m_guiDoc->document();
     if (doc) {
         for (const TDF_Label& label : doc->xcaf().topLevelFreeShapes()) {
             const TopoDS_Shape shape = XCaf::shape(label);
             if (!shape.IsNull())
-                BRepBndLib::AddOptimal(shape, box, false /*useTriangulation*/, false /*useShapeTolerance*/);
+                shapes.push_back(shape);
         }
     }
+
+    // Mesh-only document (e.g. STL): no B-Rep to crunch and the graphics box is
+    // already cached, so just finish synchronously — nothing heavy to offload.
+    if (shapes.empty()) {
+        this->applyOverallSizeResult(Bnd_Box{});
+        return;
+    }
+
+    // Disable the button and show progress on it while the exact-surface pass
+    // runs on a pool thread; the continuation restores it.
+    m_overallBusy = true;
+    m_btnOverallSize->setEnabled(false);
+    const QString origLabel = m_btnOverallSize->text();
+    m_btnOverallSize->setText(tr("전체 크기 측정 중…"));
+
+    QPointer<WidgetMeasure> self = this;
+    QThreadPool::globalInstance()->start([self, shapes, origLabel]{
+        Bnd_Box box;
+        try {
+            for (const TopoDS_Shape& shape : shapes)
+                BRepBndLib::AddOptimal(shape, box, false /*useTriangulation*/, false /*useShapeTolerance*/);
+        }
+        catch (...) {
+            // leave the box void; the UI-thread continuation falls back to the graphics box
+        }
+        // Hop back to the UI thread before touching any widget/graphics state.
+        QMetaObject::invokeMethod(qApp, [self, box, origLabel]{
+            if (!self)
+                return;
+            self->m_overallBusy = false;
+            self->m_btnOverallSize->setEnabled(true);
+            self->m_btnOverallSize->setText(origLabel);
+            self->applyOverallSizeResult(box);
+        });
+    });
+}
+
+void WidgetMeasure::applyOverallSizeResult(Bnd_Box box)
+{
+    auto gfxScene = m_guiDoc->graphicsScene();
+
+    // Cache the exact B-Rep box for instant reuse on the next click. Only the
+    // expensive B-Rep box is cached; the graphics fallback below is already cheap
+    // and tracks live visibility, so it's recomputed each time.
+    if (!box.IsVoid())
+        m_overallBox = box;
 
     // Fallback for mesh-only documents (e.g. STL) with no B-Rep: use the graphics
     // box of the visible model, then all graphics.
