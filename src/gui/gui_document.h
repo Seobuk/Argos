@@ -93,6 +93,13 @@ public:
     CheckState nodeVisibleState(TreeNodeId nodeId) const;
     void setNodeVisible(TreeNodeId nodeId, bool on);
 
+    // -- Color of document's tree nodes (visual override in the 3D view)
+    // Recolors all graphics objects of `nodeId`(deep node traversal). This is a
+    // display-only override; it does not alter the XCAF/document color attributes.
+    void setNodeColor(TreeNodeId nodeId, const Quantity_Color& color);
+    // Restores the node graphics to their original (material/XCAF) color.
+    void resetNodeColor(TreeNodeId nodeId);
+
     // -- Exploding
     double explodingFactor() const { return m_explodingFactor; }
     void setExplodingFactor(double t); // Must be in [0,1]

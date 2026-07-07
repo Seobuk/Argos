@@ -49,6 +49,8 @@ private slots:
 
     void BRepUtils_test();
 
+    void BndUtils_add_ignoresVoidBox_test();
+
     void CafUtils_labelTag_test();
     void CafUtils_getNamedDataKeys_test();
 

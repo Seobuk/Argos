@@ -11,12 +11,16 @@
 #include "../gui/gui_application.h"
 #include "../qtcommon/qtcore_utils.h"
 #include "item_view_buttons.h"
+#include "qtgui_utils.h"
 #include "theme.h"
 #include "widget_model_tree_builder.h"
 
 #include <QtCore/QtDebug>
 #include <QtCore/QMetaType>
+#include <QtGui/QAction>
 #include <QtGui/QMouseEvent>
+#include <QtWidgets/QColorDialog>
+#include <QtWidgets/QMenu>
 #include <QtWidgets/QTreeWidget>
 #include <QtWidgets/QTreeWidgetItemIterator>
 
@@ -170,12 +174,77 @@ WidgetModelTree::WidgetModelTree(QWidget* widget)
             }
     });
 
+    // Right-click context menu: change / reset the color of the selected part(s).
+    m_ui->treeWidget_Model->setContextMenuPolicy(Qt::CustomContextMenu);
+    QObject::connect(
+        m_ui->treeWidget_Model, &QWidget::customContextMenuRequested,
+        this, [=](const QPoint& pos) { this->showContextMenu(pos); }
+    );
+
     this->connectTreeModelDataChanged(true);
 }
 
 WidgetModelTree::~WidgetModelTree()
 {
     delete m_ui;
+}
+
+void WidgetModelTree::showContextMenu(const QPoint& pos)
+{
+    if (!m_guiApp)
+        return;
+
+    // Target nodes: the current selection, or the item under the cursor when the
+    // right-click happened outside the selection.
+    QList<QTreeWidgetItem*> items = m_ui->treeWidget_Model->selectedItems();
+    QTreeWidgetItem* itemAtPos = m_ui->treeWidget_Model->itemAt(pos);
+    if (itemAtPos && !items.contains(itemAtPos))
+        items = { itemAtPos };
+
+    // Keep only items that map to a document tree node (i.e. an actual part).
+    std::vector<DocumentTreeNode> nodes;
+    for (QTreeWidgetItem* item : items) {
+        if (Internal::treeItemType(item) & Internal::TreeItemType_DocumentTreeNode) {
+            const DocumentTreeNode node = Internal::treeItemDocumentTreeNode(item);
+            if (node.isValid())
+                nodes.push_back(node);
+        }
+    }
+
+    if (nodes.empty())
+        return;
+
+    QMenu menu(this);
+    QAction* actChangeColor = menu.addAction(tr("색상 변경..."));
+    QAction* actResetColor = menu.addAction(tr("색상 초기화"));
+
+    // Helper: run 'fn(guiDoc, nodeId)' for every targeted node.
+    auto fnForEachNode = [&](const std::function<void(GuiDocument*, TreeNodeId)>& fn) {
+        for (const DocumentTreeNode& node : nodes) {
+            GuiDocument* guiDoc = m_guiApp->findGuiDocument(node.document());
+            if (guiDoc)
+                fn(guiDoc, node.id());
+        }
+    };
+
+    QAction* chosen = menu.exec(m_ui->treeWidget_Model->viewport()->mapToGlobal(pos));
+    if (chosen == actChangeColor) {
+        const QColor qcolor = QColorDialog::getColor(
+            Qt::lightGray, this, tr("파트 색상 선택")
+        );
+        if (qcolor.isValid()) {
+            // sRGB-aware conversion so the rendered part matches the picked color.
+            const Quantity_Color color = QtGuiUtils::toPreferredColorSpace(qcolor);
+            fnForEachNode([&](GuiDocument* guiDoc, TreeNodeId nodeId) {
+                guiDoc->setNodeColor(nodeId, color);
+            });
+        }
+    }
+    else if (chosen == actResetColor) {
+        fnForEachNode([&](GuiDocument* guiDoc, TreeNodeId nodeId) {
+            guiDoc->resetNodeColor(nodeId);
+        });
+    }
 }
 
 void WidgetModelTree::refreshItemText(const ApplicationItem& appItem)
