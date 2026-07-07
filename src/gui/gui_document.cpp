@@ -401,6 +401,38 @@ void GuiDocument::setNodeVisible(TreeNodeId nodeId, bool on)
         this->signalNodesVisibilityChanged.send(mapNodeIdVisibleState);
 }
 
+void GuiDocument::setNodeColor(TreeNodeId nodeId, const Quantity_Color& color)
+{
+    bool changed = false;
+    this->foreachGraphicsObject(nodeId, [&](GraphicsObjectPtr gfxObject) {
+        if (!gfxObject)
+            return;
+
+        gfxObject->SetColor(color);
+        m_gfxScene.recomputeObjectPresentation(gfxObject);
+        changed = true;
+    });
+
+    if (changed)
+        m_gfxScene.redraw();
+}
+
+void GuiDocument::resetNodeColor(TreeNodeId nodeId)
+{
+    bool changed = false;
+    this->foreachGraphicsObject(nodeId, [&](GraphicsObjectPtr gfxObject) {
+        if (!gfxObject)
+            return;
+
+        gfxObject->UnsetColor();
+        m_gfxScene.recomputeObjectPresentation(gfxObject);
+        changed = true;
+    });
+
+    if (changed)
+        m_gfxScene.redraw();
+}
+
 void GuiDocument::setExplodingFactor(double t)
 {
     m_explodingFactor = t;

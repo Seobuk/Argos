@@ -76,6 +76,10 @@ private:
         const GuiDocument* guiDoc, const std::unordered_map<TreeNodeId, CheckState>& mapNodeId
     );
 
+    // Pops up the right-click context menu (color change / reset) for the tree
+    // nodes currently under/around `pos`.
+    void showContextMenu(const QPoint& pos);
+
     QTreeWidgetItem* loadDocumentEntity(const DocumentTreeNode& entityNode);
 
     QTreeWidgetItem* findTreeItem(const DocumentPtr& doc) const;
