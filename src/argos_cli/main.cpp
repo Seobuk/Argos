@@ -97,6 +97,35 @@ bool parseDouble(const std::string& s, double& out)
     }
 }
 
+// Load the input file into 'out', or emit a JSON error and return false.
+bool loadOrEmit(const std::string& file, int indent, TopoDS_Shape& out)
+{
+    if (file.empty()) {
+        emitError("no input file given", indent);
+        return false;
+    }
+    std::string loadErr;
+    out = argos::loadShape(file, &loadErr);
+    if (out.IsNull()) {
+        emitError(loadErr.empty() ? "failed to load file" : loadErr, indent);
+        return false;
+    }
+    return true;
+}
+
+// Parse "--density N" (positive kg/m^3). Advances i past the value. Returns
+// false after emitting a JSON error.
+bool parseDensityArg(const std::vector<std::string>& args, size_t& i, int indent, double& density)
+{
+    double d = 0;
+    if (i + 1 >= args.size() || !parseDouble(args[++i], d) || d <= 0.0) {
+        emitError("invalid value after --density", indent);
+        return false;
+    }
+    density = d;
+    return true;
+}
+
 int doMeasure(const std::vector<std::string>& args)
 {
     std::string file;
@@ -135,13 +164,9 @@ int doMeasure(const std::vector<std::string>& args)
     if (parseFailed)
         return 1; // wantIndex already emitted a JSON error
 
-    if (file.empty())
-        return emitError("no input file given", indent);
-
-    std::string loadErr;
-    const TopoDS_Shape shape = argos::loadShape(file, &loadErr);
-    if (shape.IsNull())
-        return emitError(loadErr.empty() ? "failed to load file" : loadErr, indent);
+    TopoDS_Shape shape;
+    if (!loadOrEmit(file, indent, shape))
+        return 1;
 
     if (selection.empty())
         return emitError("no sub-shape selected (use --vertex/--edge/--face)", indent);
@@ -175,13 +200,9 @@ int doInfo(const std::vector<std::string>& args)
         else if (file.empty() && !(a.size() && a[0] == '-')) file = a;
         else return emitError("unexpected argument: " + a, indent);
     }
-    if (file.empty())
-        return emitError("no input file given", indent);
-
-    std::string loadErr;
-    const TopoDS_Shape shape = argos::loadShape(file, &loadErr);
-    if (shape.IsNull())
-        return emitError(loadErr.empty() ? "failed to load file" : loadErr, indent);
+    TopoDS_Shape shape;
+    if (!loadOrEmit(file, indent, shape))
+        return 1;
 
     nlohmann::ordered_json j;
     j["ok"] = true;
@@ -240,13 +261,9 @@ int doSection(const std::vector<std::string>& args)
         else return emitError("unexpected argument: " + a, indent);
     }
 
-    if (file.empty())
-        return emitError("no input file given", indent);
-
-    std::string loadErr;
-    const TopoDS_Shape shape = argos::loadShape(file, &loadErr);
-    if (shape.IsNull())
-        return emitError(loadErr.empty() ? "failed to load file" : loadErr, indent);
+    TopoDS_Shape shape;
+    if (!loadOrEmit(file, indent, shape))
+        return 1;
 
     const argos::SectionResult res = argos::computeSection(shape, st);
 
@@ -272,10 +289,7 @@ int doProps(const std::vector<std::string>& args)
     for (size_t i = 2; i < args.size(); ++i) {
         const std::string& a = args[i];
         if (a == "--density") {
-            double d = 0;
-            if (i + 1 >= args.size() || !parseDouble(args[++i], d) || d <= 0.0)
-                return emitError("invalid value after --density", indent);
-            density = d;
+            if (!parseDensityArg(args, i, indent, density)) return 1;
         }
         else if (a == "--urdf")        urdf = true;
         else if (a == "--pretty")      indent = 2;
@@ -284,13 +298,9 @@ int doProps(const std::vector<std::string>& args)
         else return emitError("unexpected argument: " + a, indent);
     }
 
-    if (file.empty())
-        return emitError("no input file given", indent);
-
-    std::string loadErr;
-    const TopoDS_Shape shape = argos::loadShape(file, &loadErr);
-    if (shape.IsNull())
-        return emitError(loadErr.empty() ? "failed to load file" : loadErr, indent);
+    TopoDS_Shape shape;
+    if (!loadOrEmit(file, indent, shape))
+        return 1;
 
     const argos::MassProperties mp = argos::massProperties(shape, density);
     if (urdf) {
@@ -310,23 +320,16 @@ int doDigest(const std::vector<std::string>& args)
     for (size_t i = 2; i < args.size(); ++i) {
         const std::string& a = args[i];
         if (a == "--density") {
-            double d = 0;
-            if (i + 1 >= args.size() || !parseDouble(args[++i], d) || d <= 0.0)
-                return emitError("invalid value after --density", indent);
-            density = d;
+            if (!parseDensityArg(args, i, indent, density)) return 1;
         }
         else if (a == "--pretty")           indent = 2;
         else if (!a.empty() && a[0] == '-') return emitError("unknown option: " + a, indent);
         else if (file.empty())              file = a;
         else return emitError("unexpected argument: " + a, indent);
     }
-    if (file.empty())
-        return emitError("no input file given", indent);
-
-    std::string loadErr;
-    const TopoDS_Shape shape = argos::loadShape(file, &loadErr);
-    if (shape.IsNull())
-        return emitError(loadErr.empty() ? "failed to load file" : loadErr, indent);
+    TopoDS_Shape shape;
+    if (!loadOrEmit(file, indent, shape))
+        return 1;
 
     const argos::DigestResult dg = argos::digest(shape, density);
     std::cout << argos::to_json(dg, indent) << std::endl;
