@@ -19,7 +19,6 @@ namespace Mayo {
 class ButtonFlat;
 class GuiDocument;
 class IWidgetOccView;
-class WidgetClipPlanes;
 class WidgetExplodeAssembly;
 class WidgetGrid;
 class WidgetMeasure;
@@ -48,7 +47,6 @@ private:
     void updageWidgetPanelControls(QWidget* panelWidget, ButtonFlat* btnPanel);
 
     void toggleWidgetGrid(bool on);
-    void toggleWidgetClipPlanes(bool on);
     void toggleWidgetExplode(bool on);
     void toggleWidgetMeasure(bool on);
     void toggleWidgetSection(bool on);
@@ -72,7 +70,6 @@ private:
     IWidgetOccView* m_qtOccView = nullptr;
     QWidget* m_widgetBtns = nullptr;
     WidgetOccViewController* m_controller = nullptr;
-    WidgetClipPlanes* m_widgetClipPlanes = nullptr;
     WidgetExplodeAssembly* m_widgetExplodeAsm = nullptr;
     WidgetGrid* m_widgetGrid = nullptr;
     WidgetMeasure* m_widgetMeasure = nullptr;
@@ -81,7 +78,6 @@ private:
 
     ButtonFlat* m_btnFitAll = nullptr;
     ButtonFlat* m_btnGrid = nullptr;
-    ButtonFlat* m_btnEditClipping = nullptr;
     ButtonFlat* m_btnExplode = nullptr;
     ButtonFlat* m_btnMeasure = nullptr;
     ButtonFlat* m_btnSection = nullptr;

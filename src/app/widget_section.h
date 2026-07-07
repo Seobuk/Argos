@@ -3,8 +3,7 @@
 ** SPDX-License-Identifier: BSD-2-Clause
 **
 ** Reuses OCCT's Graphic3d_ClipPlane for the live visual cut and argos_core's
-** computeSection() for the section-outline readout. Additive: the advanced
-** WidgetClipPlanes (4 planes / custom / hatch) is kept as a separate tool.
+** computeSection() for the section-outline readout.
 ****************************************************************************/
 
 #pragma once

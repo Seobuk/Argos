@@ -83,9 +83,6 @@ public:
     PropertyBool defaultShowOriginTrihedron{ this, textId("defaultShowOriginTrihedron") };
     PropertyDouble instantZoomFactor{ this, textId("instantZoomFactor") };
     PropertyAngle turnViewAngleIncrement{ this, textId("turnViewAngleIncrement") };
-    // -- Graphics/ClipPlanes
-    PropertyBool clipPlanesCappingOn{ this, textId("cappingOn") };
-    PropertyBool clipPlanesCappingHatchOn{ this, textId("cappingHatchOn") };
     // -- Graphics/MeshDefaults
     PropertyOccColor meshDefaultsColor{ this, textId("color") };
     PropertyOccColor meshDefaultsEdgeColor{ this, textId("edgeColor") };

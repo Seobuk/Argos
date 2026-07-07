@@ -12,7 +12,6 @@
 #include "../qtbackend/qt_animation_backend.h"
 #include "button_flat.h"
 #include "theme.h"
-#include "widget_clip_planes.h"
 #include "widget_explode_assembly.h"
 #include "widget_grid.h"
 #include "widget_measure.h"
@@ -97,9 +96,6 @@ WidgetGuiDocument::WidgetGuiDocument(GuiDocument* guiDoc, QWidget* parent)
     m_btnGrid = this->createViewBtn(widgetBtnsContents, Theme::Icon::Grid, tr("그리드 편집"));
     m_btnGrid->setCheckable(true);
 
-    m_btnEditClipping = this->createViewBtn(widgetBtnsContents, Theme::Icon::ClipPlane, tr("클립 평면 (고급 — 다중/사용자 평면)"));
-    m_btnEditClipping->setCheckable(true);
-
     m_btnExplode = this->createViewBtn(widgetBtnsContents, Theme::Icon::Multiple, tr("조립체 분해"));
     m_btnExplode->setCheckable(true);
 
@@ -113,7 +109,6 @@ WidgetGuiDocument::WidgetGuiDocument(GuiDocument* guiDoc, QWidget* parent)
     this->createMenuViewProjections(widgetBtnsContents);
     this->createMenuItemVisibility(widgetBtnsContents);
     layoutBtns->addWidget(m_btnGrid);
-    layoutBtns->addWidget(m_btnEditClipping);
     layoutBtns->addWidget(m_btnExplode);
     layoutBtns->addWidget(m_btnMeasure);
     layoutBtns->addWidget(m_btnSection);
@@ -131,7 +126,6 @@ WidgetGuiDocument::WidgetGuiDocument(GuiDocument* guiDoc, QWidget* parent)
         });
     });
     QObject::connect(m_btnGrid, &ButtonFlat::checked, this, &WidgetGuiDocument::toggleWidgetGrid);
-    QObject::connect(m_btnEditClipping, &ButtonFlat::checked, this, &WidgetGuiDocument::toggleWidgetClipPlanes);
     QObject::connect(m_btnExplode, &ButtonFlat::checked, this, &WidgetGuiDocument::toggleWidgetExplode);
     QObject::connect(m_btnMeasure, &ButtonFlat::checked, this, &WidgetGuiDocument::toggleWidgetMeasure);
     QObject::connect(m_btnSection, &ButtonFlat::checked, this, &WidgetGuiDocument::toggleWidgetSection);
@@ -240,18 +234,6 @@ void WidgetGuiDocument::toggleWidgetGrid(bool on)
     this->updageWidgetPanelControls(m_widgetGrid, m_btnGrid);
 }
 
-void WidgetGuiDocument::toggleWidgetClipPlanes(bool on)
-{
-    if (!m_widgetClipPlanes && on) {
-        m_widgetClipPlanes = new WidgetClipPlanes(m_guiDoc->graphicsView());
-        this->createWidgetPanelContainer(m_widgetClipPlanes);
-        m_guiDoc->signalGraphicsBoundingBoxChanged.connectSlot(&WidgetClipPlanes::setRanges, m_widgetClipPlanes);
-        m_widgetClipPlanes->setRanges(m_guiDoc->graphicsBoundingBox());
-    }
-
-    this->updageWidgetPanelControls(m_widgetClipPlanes, m_btnEditClipping);
-}
-
 void WidgetGuiDocument::toggleWidgetSection(bool on)
 {
     if (!m_widgetSection && on) {
@@ -305,7 +287,7 @@ void WidgetGuiDocument::exclusiveButtonCheck(const ButtonFlat* btnCheck)
     if (!btnCheck || !btnCheck->isChecked())
         return;
 
-    ButtonFlat* arrayToggleBtn[] = { m_btnGrid, m_btnEditClipping, m_btnExplode, m_btnMeasure, m_btnSection };
+    ButtonFlat* arrayToggleBtn[] = { m_btnGrid, m_btnExplode, m_btnMeasure, m_btnSection };
     for (ButtonFlat* btn : arrayToggleBtn) {
         assert(btn->isCheckable());
         if (btn != btnCheck)
@@ -326,7 +308,7 @@ void WidgetGuiDocument::layoutWidgetPanel(QWidget* panel)
 void WidgetGuiDocument::layoutWidgetPanels()
 {
     QWidget* widgetPanels[] = {
-        m_widgetGrid, m_widgetClipPlanes, m_widgetExplodeAsm, m_widgetMeasure, m_widgetSection
+        m_widgetGrid, m_widgetExplodeAsm, m_widgetMeasure, m_widgetSection
     };
     for (QWidget* panel : widgetPanels)
         this->layoutWidgetPanel(panel);

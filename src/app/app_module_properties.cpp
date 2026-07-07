@@ -45,7 +45,6 @@ AppModuleProperties::AppModuleProperties(Settings* settings)
       m_settings(settings)
 {
     const auto sectionId_systemUnits = settings->addSection(groupId_system, textId("units"));
-    const auto sectionId_graphicsClipPlanes = settings->addSection(groupId_graphics, textId("clipPlanes"));
     const auto sectionId_graphicsMeshDefaults = settings->addSection(groupId_graphics, textId("meshDefaults"));
 
     this->retranslate();
@@ -88,9 +87,6 @@ AppModuleProperties::AppModuleProperties(Settings* settings)
     settings->addSetting(&this->defaultShowOriginTrihedron, groupId_graphics);
     settings->addSetting(&this->instantZoomFactor, groupId_graphics);
     settings->addSetting(&this->turnViewAngleIncrement, groupId_graphics);
-    // -- Clip planes
-    settings->addSetting(&this->clipPlanesCappingOn, sectionId_graphicsClipPlanes);
-    settings->addSetting(&this->clipPlanesCappingHatchOn, sectionId_graphicsClipPlanes);
     // -- Mesh defaults
     settings->addSetting(&this->meshDefaultsColor, sectionId_graphicsMeshDefaults);
     settings->addSetting(&this->meshDefaultsEdgeColor, sectionId_graphicsMeshDefaults);
@@ -128,10 +124,6 @@ AppModuleProperties::AppModuleProperties(Settings* settings)
         this->meshingChordalDeflection.setQuantity(1 * Quantity_Millimeter);
         this->meshingAngularDeflection.setQuantity(20 * Quantity_Degree);
         this->meshingRelative.setValue(false);
-    });
-    settings->addResetFunction(sectionId_graphicsClipPlanes, [this]{
-        this->clipPlanesCappingOn.setValue(true);
-        this->clipPlanesCappingHatchOn.setValue(true);
     });
     settings->addResetFunction(sectionId_graphicsMeshDefaults, [this]{
         const GraphicsMeshObjectDriver::DefaultValues meshDefaults;
@@ -245,16 +237,9 @@ void AppModuleProperties::retranslate()
     );
     this->viewCubeCorner.setDescription(textIdTr("Corner where 3D view cube is located"));
 
-    // -- Graphics/ClipPlanes
     this->defaultShowOriginTrihedron.setDescription(
         textIdTr("Show or hide by default the trihedron centered at world origin. "
                  "This doesn't affect 3D view of currently opened documents")
-    );
-    this->clipPlanesCappingOn.setDescription(
-        textIdTr("Enable capping of currently clipped graphics")
-    );
-    this->clipPlanesCappingHatchOn.setDescription(
-        textIdTr("Enable capping hatch texture of currently clipped graphics")
     );
 
     // Import
