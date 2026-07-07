@@ -9,7 +9,9 @@
 #include "ui_widget_measure.h"
 
 #include "../base/cpp_utils.h"
+#include "../base/document.h"
 #include "../base/occ_handle.h"
+#include "../base/xcaf.h"
 #include "../gui/gui_document.h"
 #include "../measure/measure_tool_brep.h"
 #include "../qtcommon/qstring_conv.h"
@@ -17,6 +19,7 @@
 
 #include <AIS_Shape.hxx>
 #include <Bnd_Box.hxx>
+#include <BRepBndLib.hxx>
 #include <Standard_Failure.hxx>
 #include <Standard_Version.hxx>
 #include <StdSelect_BRepOwner.hxx>
@@ -853,10 +856,26 @@ void WidgetMeasure::measureOverallSize()
 {
     auto gfxScene = m_guiDoc->graphicsScene();
 
-    // Axis-aligned bounding box of the whole *visible* model (fall back to all
-    // graphics if nothing is flagged visible). The view cube is not part of this
-    // box (only entity graphics contribute to it).
-    Bnd_Box box = m_guiDoc->graphicsBoundingBox(GuiDocument::OnlyVisibleGraphics);
+    // Axis-aligned bounding box of the real B-Rep geometry — NOT the graphics
+    // (tessellation) box. useTriangulation=false forces exact-surface extents;
+    // with triangulation the box is padded by the display deflection (~0.4 mm
+    // here), so a Ø88 part read 88.43. false gives the true geometric size,
+    // deflection-independent. ponytail: exact-surface AddOptimal is O(faces) —
+    // fine for a one-shot button.
+    Bnd_Box box;
+    const DocumentPtr& doc = m_guiDoc->document();
+    if (doc) {
+        for (const TDF_Label& label : doc->xcaf().topLevelFreeShapes()) {
+            const TopoDS_Shape shape = XCaf::shape(label);
+            if (!shape.IsNull())
+                BRepBndLib::AddOptimal(shape, box, false /*useTriangulation*/, false /*useShapeTolerance*/);
+        }
+    }
+
+    // Fallback for mesh-only documents (e.g. STL) with no B-Rep: use the graphics
+    // box of the visible model, then all graphics.
+    if (box.IsVoid())
+        box = m_guiDoc->graphicsBoundingBox(GuiDocument::OnlyVisibleGraphics);
     if (box.IsVoid())
         box = m_guiDoc->graphicsBoundingBox(GuiDocument::AllGraphics);
 

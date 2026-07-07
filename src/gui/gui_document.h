@@ -93,11 +93,11 @@ public:
     CheckState nodeVisibleState(TreeNodeId nodeId) const;
     void setNodeVisible(TreeNodeId nodeId, bool on);
 
-    // -- Color of document's tree nodes (visual override in the 3D view)
-    // Recolors all graphics objects of `nodeId`(deep node traversal). This is a
-    // display-only override; it does not alter the XCAF/document color attributes.
+    // -- Color of document's tree nodes
+    // Recolors all graphics objects of `nodeId`(deep node traversal) by writing the color into the
+    // XCAF/XDE color attributes, so it survives presentation recompute (and is kept on export).
     void setNodeColor(TreeNodeId nodeId, const Quantity_Color& color);
-    // Restores the node graphics to their original (material/XCAF) color.
+    // Clears the XCAF/XDE color of the node graphics (falls back to the default material color).
     void resetNodeColor(TreeNodeId nodeId);
 
     // -- Exploding
@@ -168,6 +168,11 @@ private:
 
     void mapEntity(TreeNodeId entityTreeNodeId);
     void unmapEntity(TreeNodeId entityTreeNodeId);
+
+    void foreachNodeColorTarget(
+            TreeNodeId nodeId,
+            const std::function<void(const TDF_Label&, const GraphicsObjectPtr&)>& fn
+    );
 
     struct GraphicsEntity {
         struct Object {

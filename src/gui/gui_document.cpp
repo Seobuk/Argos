@@ -21,6 +21,7 @@
 #endif
 #include <AIS_ConnectedInteractive.hxx>
 #include <AIS_Trihedron.hxx>
+#include <XCAFDoc_ColorTool.hxx>
 #include <Geom_Axis2Placement.hxx>
 #include <Graphic3d_GraphicDriver.hxx>
 #include <V3d_TypeOfOrientation.hxx>
@@ -401,14 +402,38 @@ void GuiDocument::setNodeVisible(TreeNodeId nodeId, bool on)
         this->signalNodesVisibilityChanged.send(mapNodeIdVisibleState);
 }
 
-void GuiDocument::setNodeColor(TreeNodeId nodeId, const Quantity_Color& color)
+// Applies 'fn(label, gfxObject)' for every graphics object under 'nodeId', where 'label' is the
+// XDE label the object's presentation is built from. XCAFPrs_AISObject reads per-shape colors from
+// the XDE on every Compute(), so a plain AIS SetColor() gets wiped on recompute — the color must be
+// written into the XDE label instead. Recomputes the presentation (and the shared product behind an
+// instance) and redraws once if anything changed.
+void GuiDocument::foreachNodeColorTarget(
+        TreeNodeId nodeId, const std::function<void(const TDF_Label&, const GraphicsObjectPtr&)>& fn
+    )
 {
+    const Tree<TDF_Label>& tree = m_document->modelTree();
+    const GraphicsEntity* ptrItem = this->findGraphicsEntity(tree.nodeRoot(nodeId));
+    if (!ptrItem)
+        return;
+
     bool changed = false;
-    this->foreachGraphicsObject(nodeId, [&](GraphicsObjectPtr gfxObject) {
+    traverseTree(nodeId, tree, [&](TreeNodeId id) {
+        GraphicsObjectPtr gfxObject = CppUtils::findValue(id, ptrItem->mapTreeNodeGfxObject);
         if (!gfxObject)
             return;
 
-        gfxObject->SetColor(color);
+        const TDF_Label label = tree.nodeData(id);
+        if (label.IsNull())
+            return;
+
+        fn(label, gfxObject);
+
+        // An instance shares the product presentation via AIS_ConnectedInteractive; force the
+        // connected XCAFPrs_AISObject to re-read the XDE color it was built from.
+        auto aisLink = OccHandle<AIS_ConnectedInteractive>::DownCast(gfxObject);
+        if (aisLink && aisLink->HasConnection())
+            aisLink->ConnectedTo()->Redisplay(true);
+
         m_gfxScene.recomputeObjectPresentation(gfxObject);
         changed = true;
     });
@@ -417,20 +442,36 @@ void GuiDocument::setNodeColor(TreeNodeId nodeId, const Quantity_Color& color)
         m_gfxScene.redraw();
 }
 
+void GuiDocument::setNodeColor(TreeNodeId nodeId, const Quantity_Color& color)
+{
+    OccHandle<XCAFDoc_ColorTool> colorTool = m_document->xcaf().colorTool();
+    if (!colorTool)
+        return;
+
+    this->foreachNodeColorTarget(nodeId, [&](const TDF_Label& label, const GraphicsObjectPtr&) {
+        // Instances share the product presentation, so the 3D view renders the
+        // *product* (referred) color, not the instance/reference color. Write to
+        // the product label so the change is actually visible. Trade-off: repeated
+        // parts (e.g. all magnets sharing one product) recolor together.
+        const TDF_Label target = XCaf::isShapeReference(label) ? XCaf::shapeReferred(label) : label;
+        colorTool->SetColor(target, color, XCAFDoc_ColorGen);
+        colorTool->SetColor(target, color, XCAFDoc_ColorSurf);
+    });
+}
+
 void GuiDocument::resetNodeColor(TreeNodeId nodeId)
 {
-    bool changed = false;
-    this->foreachGraphicsObject(nodeId, [&](GraphicsObjectPtr gfxObject) {
-        if (!gfxObject)
-            return;
+    OccHandle<XCAFDoc_ColorTool> colorTool = m_document->xcaf().colorTool();
+    if (!colorTool)
+        return;
 
-        gfxObject->UnsetColor();
-        m_gfxScene.recomputeObjectPresentation(gfxObject);
-        changed = true;
+    this->foreachNodeColorTarget(nodeId, [&](const TDF_Label& label, const GraphicsObjectPtr&) {
+        // Reset the product color — that is what the view renders (see setNodeColor).
+        const TDF_Label target = XCaf::isShapeReference(label) ? XCaf::shapeReferred(label) : label;
+        colorTool->UnSetColor(target, XCAFDoc_ColorGen);
+        colorTool->UnSetColor(target, XCAFDoc_ColorSurf);
+        colorTool->UnSetColor(target, XCAFDoc_ColorCurv);
     });
-
-    if (changed)
-        m_gfxScene.redraw();
 }
 
 void GuiDocument::setExplodingFactor(double t)
