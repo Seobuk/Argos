@@ -12,6 +12,7 @@
 #include <QtWidgets/QWidget>
 #include <V3d_TypeOfOrientation.hxx>
 
+class QLabel;
 class QMenu;
 
 namespace Mayo {
@@ -40,6 +41,10 @@ public:
 
     QColor panelBackgroundColor() const;
 
+    // Argos: update the always-on 3D mouse-coordinate readout anchored at the
+    // bottom-right corner of the view.
+    void updateMouseCoords(double x, double y, double z, const QString& hoverText);
+
 protected:
     void resizeEvent(QResizeEvent* event) override;
 
@@ -63,6 +68,8 @@ private:
     void layoutViewControls();
     void layoutWidgetPanel(QWidget* panel);
     void layoutWidgetPanels();
+    // Argos: re-anchor the mouse-coordinate readout to the view bottom-right.
+    void layoutMouseCoords();
 
     ButtonFlat* createViewBtn(QWidget* parent, Theme::Icon icon, const QString& tooltip) const;
     QMenu* createViewMenu(QWidget* parent) const;
@@ -71,6 +78,9 @@ private:
     GuiDocument* m_guiDoc = nullptr;
     IWidgetOccView* m_qtOccView = nullptr;
     QWidget* m_widgetBtns = nullptr;
+    QWidget* m_widgetMouseCoords = nullptr; // Argos: bottom-right coordinate readout
+    QLabel* m_labelHoverMeasure = nullptr;
+    QLabel* m_labelMouseCoords = nullptr;
     WidgetOccViewController* m_controller = nullptr;
     WidgetClipPlanes* m_widgetClipPlanes = nullptr;
     WidgetExplodeAssembly* m_widgetExplodeAsm = nullptr;

@@ -140,10 +140,8 @@ WidgetMainControl::WidgetMainControl(GuiApplication* guiApp, QWidget* parent)
     // Finalize setup
     m_ui->widget_LeftHeader->installEventFilter(this);
     m_ui->widget_ControlGuiDocuments->installEventFilter(this);
-    m_ui->stack_GuiDocuments->installEventFilter(this);
     this->widgetLeftSideBar()->installEventFilter(this);
     this->onLeftContentsPageChanged(m_ui->stack_LeftContents->currentIndex());
-    m_ui->widget_MouseCoords->hide();
     this->setWidgetLeftSideBarWidthFactor(0.25);
 
     // Argos: document tabs above the 3D view (replaces the document selector combo)
@@ -229,11 +227,6 @@ bool WidgetMainControl::eventFilter(QObject* watched, QEvent* event)
     if (watched == m_ui->widget_LeftHeader && eventType == QEvent::Show) {
         fnSizeBtn(m_ui->widget_LeftHeader, m_ui->combo_LeftContents);
         return true;
-    }
-
-    if (watched == m_ui->stack_GuiDocuments) {
-        if (eventType == QEvent::Enter || eventType == QEvent::Leave)
-            m_ui->widget_MouseCoords->setHidden(eventType == QEvent::Leave);
     }
 
     if (watched == this->widgetLeftSideBar()) {
@@ -651,12 +644,12 @@ void WidgetMainControl::onGuiDocumentAdded(GuiDocument* guiDoc)
                 selector->PickedPoint(1) :
                 GraphicsUtils::V3dView_to3dPosition(guiDoc->v3dView(), xPos, yPos)
         ;
-        m_ui->label_ValuePosX->setText(QString::number(pos3d.X(), 'f', 3));
-        m_ui->label_ValuePosY->setText(QString::number(pos3d.Y(), 'f', 3));
-        m_ui->label_ValuePosZ->setText(QString::number(pos3d.Z(), 'f', 3));
-        // Argos: live hover measure of the sub-shape under the cursor (zero-click).
-        m_ui->label_HoverMeasure->setText(
-            WidgetMeasure::quickMeasureText(gfxScene->currentHighlightedOwner()));
+        // Argos: coordinates + live hover measure are shown in the always-on
+        // readout anchored at the bottom-right of the 3D view.
+        widget->updateMouseCoords(
+            pos3d.X(), pos3d.Y(), pos3d.Z(),
+            WidgetMeasure::quickMeasureText(gfxScene->currentHighlightedOwner())
+        );
     });
 
     m_ui->stack_GuiDocuments->addWidget(widget);
