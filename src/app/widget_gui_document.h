@@ -68,6 +68,8 @@ private:
     void layoutWidgetPanels();
     // Argos: re-anchor the mouse-coordinate readout to the view bottom-right.
     void layoutMouseCoords();
+    // Argos: re-anchor the section usage guide to the view top-center.
+    void layoutSectionHint();
 
     ButtonFlat* createViewBtn(QWidget* parent, Theme::Icon icon, const QString& tooltip) const;
     QMenu* createViewMenu(QWidget* parent) const;
@@ -79,6 +81,8 @@ private:
     QWidget* m_widgetMouseCoords = nullptr; // Argos: bottom-right coordinate readout
     QLabel* m_labelHoverMeasure = nullptr;
     QLabel* m_labelMouseCoords = nullptr;
+    QWidget* m_widgetSectionHint = nullptr; // Argos: on-screen guide while section is active
+    QLabel* m_labelSectionHint = nullptr;
     WidgetOccViewController* m_controller = nullptr;
     WidgetExplodeAssembly* m_widgetExplodeAsm = nullptr;
     WidgetGrid* m_widgetGrid = nullptr;

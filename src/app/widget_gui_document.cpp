@@ -31,6 +31,8 @@
 #include <QtWidgets/QWidgetAction>
 #include <Standard_Version.hxx>
 
+#include <algorithm>
+
 namespace Mayo {
 
 namespace {
@@ -135,6 +137,29 @@ WidgetGuiDocument::WidgetGuiDocument(GuiDocument* guiDoc, QWidget* parent)
         m_widgetMouseCoords = this->createWidgetPanelContainer(coordsContents);
     }
 
+    // Argos: on-screen usage guide shown while the section (clip-plane) tool is
+    // active, so a first-time user can drive the cut without hunting the panel.
+    {
+        auto hintContents = new QWidget;
+        auto layoutHint = new QHBoxLayout(hintContents);
+        layoutHint->setContentsMargins(QMargins{9, 6, 9, 6});
+
+        m_labelSectionHint = new QLabel(hintContents);
+        m_labelSectionHint->setTextFormat(Qt::RichText);
+        m_labelSectionHint->setWordWrap(true);
+        m_labelSectionHint->setMaximumWidth(380);
+        m_labelSectionHint->setText(tr(
+            "<b>✂️ 단면 보기 사용 중</b><br>"
+            "• 오른쪽 패널에서 <b>평면(XY · YZ · ZX)</b> 선택<br>"
+            "• <b>오프셋 슬라이더</b>로 자를 위치 이동 · <b>방향 반전</b>으로 자르는 쪽 전환<br>"
+            "• <b>캡</b>으로 잘린 단면 채우기 · 단면 둘레/경계는 패널 하단에 표시<br>"
+            "• 단면 버튼을 다시 누르면 종료"));
+        layoutHint->addWidget(m_labelSectionHint);
+
+        m_widgetSectionHint = this->createWidgetPanelContainer(hintContents);
+        m_widgetSectionHint->setVisible(false);   // shown only while section mode is on
+    }
+
     auto gfxScene = m_guiDoc->graphicsScene();
     gfxScene->signalRedrawRequested.connectSlot([=](const OccHandle<V3d_View>& view) {
         if (view == m_qtOccView->v3dView())
@@ -214,6 +239,7 @@ void WidgetGuiDocument::resizeEvent(QResizeEvent* event)
     this->layoutViewControls();
     this->layoutWidgetPanels();
     this->layoutMouseCoords();
+    this->layoutSectionHint();
 }
 
 QWidget* WidgetGuiDocument::createWidgetPanelContainer(QWidget* widgetContents)
@@ -274,6 +300,13 @@ void WidgetGuiDocument::toggleWidgetSection(bool on)
         m_widgetSection->setSectionOn(on);
 
     this->updageWidgetPanelControls(m_widgetSection, m_btnSection);
+
+    // Argos: reveal the on-screen usage guide only while the tool is active.
+    if (m_widgetSectionHint) {
+        m_widgetSectionHint->setVisible(on);
+        if (on)
+            this->layoutSectionHint();
+    }
 }
 
 void WidgetGuiDocument::toggleWidgetExplode(bool on)
@@ -581,6 +614,22 @@ void WidgetGuiDocument::layoutMouseCoords()
     const QSize sz = m_widgetMouseCoords->frameSize();
     m_widgetMouseCoords->move(this->width() - sz.width() - margin, this->height() - sz.height() - margin);
     m_widgetMouseCoords->raise();
+}
+
+void WidgetGuiDocument::layoutSectionHint()
+{
+    if (!m_widgetSectionHint || !m_widgetSectionHint->isVisible())
+        return;
+
+    m_widgetSectionHint->adjustSize();
+    const int margin = this->devicePixelRatio() * 2 * Internal_widgetMargin;
+    const QSize sz = m_widgetSectionHint->frameSize();
+    // Bottom-centre: clears the top-left controls/section panel, the top-right
+    // view cube, and the bottom-right coordinate readout.
+    const int x = std::max(margin, (this->width() - sz.width()) / 2);
+    const int y = std::max(margin, this->height() - sz.height() - margin);
+    m_widgetSectionHint->move(x, y);
+    m_widgetSectionHint->raise();
 }
 
 void WidgetGuiDocument::updateMouseCoords(double x, double y, double z, const QString& hoverText)
