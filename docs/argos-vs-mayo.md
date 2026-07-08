@@ -100,11 +100,30 @@ Qt GUI (Argos)    argos-cli / (향후) MCP
 
 ---
 
+## 3.5 2D 도면(Drawing) 🟡
+
+Mayo에는 없는 기능입니다. OpenCASCADE의 **은선 제거(HLR, `HLRBRep`)** 로 3D 형상을
+2D 정투상 뷰로 투영해 **엔지니어링 도면**을 생성합니다.
+
+- **엔진** ✅ `argos_core/drawing.h` — Qt 비의존. `computeDrawing()`이
+  **정면·평면·우측면 3면도 + 등각도**를 만들고, 뷰마다 가시선(외곽선)·은선(점선)을
+  폴리라인으로 추출, **전체 치수(가로·세로)**·도면 테두리·표제란을 배치.
+- **투상법** ✅ **제1각법(ISO/한국)** / **제3각법(ASME)** 배치 규칙 지원 (`--projection`).
+- **출력** ✅ **SVG**(열람용, 벡터) + **DXF R12**(AutoCAD 등 CAD 편집용). 은선은
+  DASHED 레이어, 치수/텍스트는 별도 레이어.
+- **CLI** ✅ `argos-cli drawing <file> -o out.svg|out.dxf [옵션]`
+- **GUI** ⏳ (엔진·CLI 우선; 패널에서 "도면 내보내기"는 후속).
+- **제약**: HLR은 정확 B-Rep 기반이라 STEP/IGES/BREP에서 동작(메시-only STL 제외).
+  상세 피처 치수·단면 뷰·GD&T·BOM은 아직 ⏳.
+
+---
+
 ## 4. 헤드리스 CLI ✅
 
 ```
 argos-cli measure <file> [--vertex N | --edge N | --face N]... [--point-to-point] [--circle-mode center|min|max] [--pretty]
 argos-cli section <file> [--plane xy|yz|zx] [--offset N] [--flip]
+argos-cli drawing <file> -o <out.svg|out.dxf> [--projection first|third] [--views front,top,right,iso] [--format svg|dxf|both]
 argos-cli info    <file>
 ```
 - 결과를 **JSON으로 stdout** 출력 → 스크립트/AI가 그대로 소비.

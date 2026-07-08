@@ -6,6 +6,7 @@
 ** the dispatch() matrix and proves the core is usable headlessly (the AI path).
 ****************************************************************************/
 
+#include "argos_core/drawing.h"
 #include "argos_core/measure.h"
 #include "argos_core/section.h"
 #include "3rdparty/nlohmann/json.hpp"
@@ -335,6 +336,60 @@ int main()
             secJsonOk = j.contains("plane") && j.contains("coefficients") && j.contains("normal");
         } catch (...) { secJsonOk = false; }
         check(secJsonOk, "SectionState to_json valid with plane/normal/coefficients");
+    }
+
+    // --- 2D drawing generation (HLR orthographic views) ------------------
+    {
+        DrawingOptions dopt;              // default: first-angle, all four views
+        const Drawing dr = computeDrawing(box, dopt, "box");
+        check(dr.ok, "computeDrawing(box) succeeds", dr.error);
+        if (dr.ok) {
+            check(dr.views.size() == 4, "drawing has 4 views",
+                  "got=" + std::to_string(dr.views.size()));
+            check(dr.sheetWidth > 0 && dr.sheetHeight > 0, "sheet has positive size");
+
+            auto findView = [&](const std::string& n) -> const DrawingView* {
+                for (const auto& v : dr.views) if (v.name == n) return &v;
+                return nullptr;
+            };
+            // Box 10(X) x 20(Y) x 30(Z): front shows X x Z, top X x Y, right Y x Z.
+            if (const DrawingView* f = findView("front")) {
+                checkNear(f->width, 10.0, 1e-3, "front view width == 10 (X)");
+                checkNear(f->height, 30.0, 1e-3, "front view height == 30 (Z)");
+            } else check(false, "front view present");
+            if (const DrawingView* t = findView("top")) {
+                checkNear(t->width, 10.0, 1e-3, "top view width == 10 (X)");
+                checkNear(t->height, 20.0, 1e-3, "top view height == 20 (Y)");
+            } else check(false, "top view present");
+            if (const DrawingView* rv = findView("right")) {
+                checkNear(rv->width, 20.0, 1e-3, "right view width == 20 (Y)");
+                checkNear(rv->height, 30.0, 1e-3, "right view height == 30 (Z)");
+            } else check(false, "right view present");
+
+            const std::string svg = to_svg(dr);
+            check(svg.find("<svg") != std::string::npos
+                      && svg.find("polyline") != std::string::npos,
+                  "SVG output contains <svg> and polylines");
+            const std::string dxf = to_dxf(dr);
+            check(dxf.find("ENTITIES") != std::string::npos
+                      && dxf.find("\nLINE\n") != std::string::npos,
+                  "DXF output contains ENTITIES and LINE entities");
+        }
+
+        // projection + view-list parsing
+        ProjectionAngle pa;
+        check(parseProjectionAngle("third", pa) && pa == ProjectionAngle::Third, "parse 'third'");
+        check(parseProjectionAngle("first", pa) && pa == ProjectionAngle::First, "parse 'first'");
+        check(!parseProjectionAngle("bogus", pa), "parseProjectionAngle rejects unknown");
+        std::vector<ViewKind> vs;
+        check(parseViewList("front,right", vs) && vs.size() == 2, "parseViewList 'front,right'");
+        check(!parseViewList("front,bogus", vs), "parseViewList rejects unknown token");
+
+        // a subset with only the front view still builds
+        DrawingOptions f1;
+        f1.views = { ViewKind::Front };
+        const Drawing d1 = computeDrawing(box, f1, "box");
+        check(d1.ok && d1.views.size() == 1, "single-view drawing builds", d1.error);
     }
 
     // --- empty selection -> error ----------------------------------------

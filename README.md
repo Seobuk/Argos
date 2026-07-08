@@ -73,7 +73,20 @@ argos-cli props part.step --urdf
 # 모델 요약 / 한 번에 요약(치수·질량·지름)
 argos-cli info part.step
 argos-cli digest part.step --pretty
+
+# 2D 도면 생성 (은선 제거 정투상: 정면·평면·우측면 + 등각)
+argos-cli drawing part.step -o part.svg                 # SVG (기본, 제1각법)
+argos-cli drawing part.step -o part.dxf --projection third   # DXF, 제3각법
+argos-cli drawing part.step -o part --format both       # SVG + DXF 동시
+argos-cli drawing part.step -o part.svg --views front,top,right --no-hidden
 ```
+
+### 📐 2D 도면 (SVG / DXF)
+STEP/IGES/BREP을 넣으면 **은선 제거(HLR) 정투상 도면**을 생성합니다 —
+**정면·평면·우측면 3면도 + 등각도**, 은선(점선)·외곽선, 각 뷰의 **전체 치수(가로·세로)**,
+도면 테두리·표제란. **제1각법(ISO/한국)·제3각법(ASME)** 배치를 지원하고,
+**SVG**(바로 열람)와 **DXF R12**(AutoCAD 등에서 편집)로 저장합니다. 엔진은
+`argos_core`(Qt 비의존)에 있어 GUI·CLI·(향후)MCP가 공유합니다.
 
 ### 📑 STEP 측정 보고서 (PowerPoint 자동 생성)
 STEP을 넣으면 폴더를 만들고 **사진·치수 중심의 PowerPoint 보고서**를 자동 생성합니다 —

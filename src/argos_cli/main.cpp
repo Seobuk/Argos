@@ -14,6 +14,7 @@
 ** names) reach OpenCASCADE as UTF-8.
 ****************************************************************************/
 
+#include "../argos_core/drawing.h"
 #include "../argos_core/io.h"
 #include "../argos_core/measure.h"
 #include "../argos_core/section.h"
@@ -27,6 +28,7 @@
 
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -53,7 +55,15 @@ void printUsage()
         "  argos-cli props   <file> [--density N] [--urdf] [--pretty]\n"
         "  argos-cli digest  <file> [--density N] [--pretty]\n"
         "  argos-cli info    <file> [--pretty]\n"
-        "  argos-cli reorient <file> -o <out.step> [--rx D] [--ry D] [--rz D]\n\n"
+        "  argos-cli reorient <file> -o <out.step> [--rx D] [--ry D] [--rz D]\n"
+        "  argos-cli drawing <file> -o <out.svg|out.dxf> [drawing options]\n\n"
+        "drawing options (2D orthographic views via hidden-line removal):\n"
+        "  -o, --out <path>          output file; format inferred from .svg/.dxf\n"
+        "  --format svg|dxf|both     force output format(s) (default: by suffix)\n"
+        "  --projection first|third  view layout convention (default first, ISO/KR)\n"
+        "  --views front,top,right,iso   which views to draw (default all four)\n"
+        "  --no-hidden               omit hidden (dashed) lines\n"
+        "  --no-dims                 omit overall dimensions\n\n"
         "reorient options (rotate about global axes through the origin, degrees):\n"
         "  -o, --out <path>   output STEP file (required)\n"
         "  --rx / --ry / --rz D   rotation about X / Y / Z (e.g. left face -> front: --rz 90)\n\n"
@@ -424,6 +434,101 @@ int doReorient(const std::vector<std::string>& args)
     return 0;
 }
 
+// Generate a 2D orthographic drawing (front/top/right + iso) via HLR and write
+// it as SVG and/or DXF. The format is taken from --format, else the -o suffix.
+int doDrawing(const std::vector<std::string>& args)
+{
+    std::string file, out, formatArg;
+    argos::DrawingOptions opt;
+    int indent = -1;
+
+    for (size_t i = 2; i < args.size(); ++i) {
+        const std::string& a = args[i];
+        if (a == "-o" || a == "--out") {
+            if (i + 1 >= args.size()) return emitError("missing path after " + a, indent);
+            out = args[++i];
+        }
+        else if (a == "--projection") {
+            if (i + 1 >= args.size() || !argos::parseProjectionAngle(args[++i], opt.projection))
+                return emitError("invalid --projection (use first|third)", indent);
+        }
+        else if (a == "--views") {
+            if (i + 1 >= args.size() || !argos::parseViewList(args[++i], opt.views))
+                return emitError("invalid --views (comma list of front,top,right,iso)", indent);
+        }
+        else if (a == "--format") {
+            if (i + 1 >= args.size()) return emitError("missing value after --format", indent);
+            formatArg = args[++i];
+            for (char& c : formatArg) c = char(std::tolower((unsigned char)c));
+            if (formatArg != "svg" && formatArg != "dxf" && formatArg != "both")
+                return emitError("invalid --format (use svg|dxf|both)", indent);
+        }
+        else if (a == "--no-hidden")        opt.hiddenLines = false;
+        else if (a == "--no-dims")          opt.dimensions = false;
+        else if (a == "--pretty")           indent = 2;
+        else if (!a.empty() && a[0] == '-') return emitError("unknown option: " + a, indent);
+        else if (file.empty())              file = a;
+        else return emitError("unexpected argument: " + a, indent);
+    }
+
+    if (out.empty())
+        return emitError("missing output path (use -o <out.svg|out.dxf>)", indent);
+
+    TopoDS_Shape shape;
+    if (!loadOrEmit(file, indent, shape))
+        return 1;
+
+    const std::string title = std::filesystem::path(file).stem().string();
+    const argos::Drawing dr = argos::computeDrawing(shape, opt, title);
+    if (!dr.ok)
+        return emitError(dr.error.empty() ? "failed to build drawing" : dr.error, indent);
+
+    // Resolve which formats to write and their paths.
+    const std::filesystem::path outPath(out);
+    std::string ext = outPath.extension().string();
+    for (char& c : ext) c = char(std::tolower((unsigned char)c));
+    const std::filesystem::path stem =
+        (ext == ".svg" || ext == ".dxf") ? (outPath.parent_path() / outPath.stem()) : outPath;
+
+    std::vector<std::pair<std::string, std::filesystem::path>> targets;
+    if (formatArg == "both") {
+        targets.push_back({ "svg", std::filesystem::path(stem).replace_extension(".svg") });
+        targets.push_back({ "dxf", std::filesystem::path(stem).replace_extension(".dxf") });
+    }
+    else if (formatArg == "svg")
+        targets.push_back({ "svg", ext == ".svg" ? outPath : std::filesystem::path(stem).replace_extension(".svg") });
+    else if (formatArg == "dxf")
+        targets.push_back({ "dxf", ext == ".dxf" ? outPath : std::filesystem::path(stem).replace_extension(".dxf") });
+    else if (ext == ".dxf")
+        targets.push_back({ "dxf", outPath });
+    else if (ext == ".svg")
+        targets.push_back({ "svg", outPath });
+    else
+        targets.push_back({ "svg", std::filesystem::path(out + ".svg") });
+
+    std::vector<std::string> written;
+    for (const auto& t : targets) {
+        const std::string content = (t.first == "svg") ? argos::to_svg(dr) : argos::to_dxf(dr);
+        std::ofstream ofs(t.second, std::ios::binary);
+        if (!ofs)
+            return emitError("cannot open output file: " + t.second.string(), indent);
+        ofs.write(content.data(), std::streamsize(content.size()));
+        if (!ofs)
+            return emitError("failed to write: " + t.second.string(), indent);
+        written.push_back(t.second.string());
+    }
+
+    nlohmann::ordered_json j;
+    j["ok"] = true;
+    j["input"] = file;
+    j["outputs"] = written;
+    try { j["drawing"] = nlohmann::ordered_json::parse(argos::to_json(dr)); }
+    catch (...) {}
+    std::cout << j.dump(indent, ' ', false, nlohmann::ordered_json::error_handler_t::replace)
+              << std::endl;
+    return 0;
+}
+
 int runMain(const std::vector<std::string>& args)
 {
     if (args.size() < 2) {
@@ -444,6 +549,8 @@ int runMain(const std::vector<std::string>& args)
         return doDigest(args);
     if (cmd == "reorient")
         return doReorient(args);
+    if (cmd == "drawing" || cmd == "draw")
+        return doDrawing(args);
     if (cmd == "-h" || cmd == "--help" || cmd == "help") {
         printUsage();
         return 0;
