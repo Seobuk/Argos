@@ -19,6 +19,7 @@
 #include <vector>
 
 class QCheckBox;
+class QComboBox;
 class QListWidget;
 class QPushButton;
 
@@ -121,6 +122,11 @@ private:
     // Argos SolidWorks-style controls (created in code, see constructor)
     QCheckBox* m_checkShowXyz = nullptr;
     QCheckBox* m_checkPointToPoint = nullptr;
+    // Argos: SolidWorks-style distance mode for a two-circle selection
+    // (center-to-center / minimum / maximum). Enabled only when the current
+    // selection resolves to a circle pair.
+    QComboBox* m_comboCircleMode = nullptr;
+    QWidget* m_circleModeRow = nullptr;
     QCheckBox* m_checkSelVertex = nullptr;   // Argos: filter — allow picking vertices
     QCheckBox* m_checkSelEdge = nullptr;     // Argos: filter — allow picking edges
     QCheckBox* m_checkSelFace = nullptr;     // Argos: filter — allow picking faces

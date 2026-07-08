@@ -62,6 +62,7 @@ void printUsage()
         "  --edge   N      select the N-th edge\n"
         "  --face   N      select the N-th face\n"
         "  --point-to-point   force minimum point-to-point distance for 2 entities\n"
+        "  --circle-mode M    for 2 circular edges: center|min|max distance (default center)\n"
         "  --no-xyz           omit the dX/dY/dZ decomposition\n\n"
         "section options:\n"
         "  --plane xy|yz|zx|custom   datum plane (default xy)\n"
@@ -164,6 +165,12 @@ int doMeasure(const std::vector<std::string>& args)
         else if (a == "--edge")           { if (!wantIndex(TopAbs_EDGE))   { parseFailed = true; break; } }
         else if (a == "--face")           { if (!wantIndex(TopAbs_FACE))   { parseFailed = true; break; } }
         else if (a == "--point-to-point") opt.pointToPoint = true;
+        else if (a == "--circle-mode") {
+            if (i + 1 >= args.size()
+                    || !argos::parseCircleDistanceMode(args[++i], opt.circleMode)) {
+                return emitError("invalid value after --circle-mode (use center|min|max)", indent);
+            }
+        }
         else if (a == "--no-xyz")         opt.showXyz = false;
         else if (a == "--pretty")         indent = 2;
         else if (!a.empty() && a[0] == '-') return emitError("unknown option: " + a, indent);

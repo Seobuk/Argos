@@ -12,10 +12,13 @@
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRep_Tool.hxx>
+#include <gp_Ax2.hxx>
+#include <gp_Circ.hxx>
 #include <gp_Pln.hxx>
 #include <TopExp.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
@@ -203,6 +206,55 @@ int main()
             check(r.ok && r.kind == MeasureKind::Circle, "circular edge -> Circle", r.error);
             if (r.radius)
                 checkNear(*r.radius, R, 1e-6, "circular edge radius ~ 5");
+        }
+    }
+
+    // --- two circles -> center / min / max distance (SolidWorks dropdown) --
+    {
+        // Coplanar circles (z=0): A r=5 @ origin, B r=3 @ (20,0,0). Centres 20
+        // apart on X, so: center-to-center=20, min rim=20-5-3=12, max rim=20+5+3=28.
+        const gp_Circ cA(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), 5.0);
+        const gp_Circ cB(gp_Ax2(gp_Pnt(20, 0, 0), gp_Dir(0, 0, 1)), 3.0);
+        const TopoDS_Shape eA = BRepBuilderAPI_MakeEdge(cA).Edge();
+        const TopoDS_Shape eB = BRepBuilderAPI_MakeEdge(cB).Edge();
+
+        // default -> center-to-center
+        {
+            const MeasureResult r = dispatch({ eA, eB });
+            check(r.ok && r.kind == MeasureKind::CenterDistance,
+                  "2 circles (default) -> CenterDistance", r.error);
+            if (r.value)
+                checkNear(*r.value, 20.0, 1e-6, "circle center-to-center == 20");
+        }
+        // minimum rim-to-rim
+        {
+            MeasureOptions o;
+            o.circleMode = CircleDistanceMode::Minimum;
+            const MeasureResult r = dispatch({ eA, eB }, o);
+            check(r.ok && r.kind == MeasureKind::MinDistance,
+                  "2 circles (min) -> MinDistance", r.error);
+            if (r.value)
+                checkNear(*r.value, 12.0, 1e-3, "circle min rim distance == 12");
+        }
+        // maximum rim-to-rim (sampled; allow a small discretisation tolerance)
+        {
+            MeasureOptions o;
+            o.circleMode = CircleDistanceMode::Maximum;
+            const MeasureResult r = dispatch({ eA, eB }, o);
+            check(r.ok && r.kind == MeasureKind::MaxDistance,
+                  "2 circles (max) -> MaxDistance", r.error);
+            if (r.value)
+                checkNear(*r.value, 28.0, 0.05, "circle max rim distance == 28");
+        }
+        // parse helper round-trips
+        {
+            CircleDistanceMode m;
+            check(parseCircleDistanceMode("max", m) && m == CircleDistanceMode::Maximum,
+                  "parseCircleDistanceMode(\"max\")");
+            check(parseCircleDistanceMode("CENTER", m) && m == CircleDistanceMode::CenterToCenter,
+                  "parseCircleDistanceMode(\"CENTER\")");
+            check(!parseCircleDistanceMode("bogus", m),
+                  "parseCircleDistanceMode rejects unknown");
         }
     }
 

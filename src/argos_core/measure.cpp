@@ -32,6 +32,7 @@
 #include "../3rdparty/nlohmann/json.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <functional>
@@ -136,19 +137,60 @@ void guarded(MeasureResult& r, Fn&& fn)
     }
 }
 
-void fillDistance(MeasureResult& r, const Mayo::MeasureDistance& d, bool showXyz)
+void fillDistancePoints(MeasureResult& r, const gp_Pnt& p1, const gp_Pnt& p2,
+                        double value, bool showXyz)
 {
-    r.value = d.value.value();   // mm
+    r.value = value;   // mm
     r.unit = "mm";
-    r.point = toVec3(d.pnt1);
-    r.point2 = toVec3(d.pnt2);
+    r.point = toVec3(p1);
+    r.point2 = toVec3(p2);
     if (showXyz) {
         r.delta = Vec3{
-            std::abs(d.pnt2.X() - d.pnt1.X()),
-            std::abs(d.pnt2.Y() - d.pnt1.Y()),
-            std::abs(d.pnt2.Z() - d.pnt1.Z())
+            std::abs(p2.X() - p1.X()),
+            std::abs(p2.Y() - p1.Y()),
+            std::abs(p2.Z() - p1.Z())
         };
     }
+}
+
+void fillDistance(MeasureResult& r, const Mayo::MeasureDistance& d, bool showXyz)
+{
+    fillDistancePoints(r, d.pnt1, d.pnt2, d.value.value(), showXyz);
+}
+
+// Farthest rim-to-rim distance between two edges (typically circles/arcs).
+// OCCT has no direct "maximum extrema" for this, so we sample each edge along
+// its real parameter range and take the farthest pair — which also handles
+// partial arcs correctly. Reports the two extreme points via 'p1'/'p2'.
+double maxDistanceBetweenEdges(const TopoDS_Shape& a, const TopoDS_Shape& b,
+                               gp_Pnt& p1, gp_Pnt& p2)
+{
+    constexpr int kSamples = 180;   // 1 sample / 2deg on a full circle
+
+    auto sample = [](const TopoDS_Shape& e) {
+        std::vector<gp_Pnt> pts;
+        BRepAdaptor_Curve c(TopoDS::Edge(e));
+        const double u0 = c.FirstParameter();
+        const double u1 = c.LastParameter();
+        pts.reserve(kSamples);
+        for (int i = 0; i < kSamples; ++i) {
+            const double t = double(i) / double(kSamples - 1);  // kSamples > 1
+            pts.push_back(c.Value(u0 + (u1 - u0) * t));
+        }
+        return pts;
+    };
+
+    const std::vector<gp_Pnt> pa = sample(a);
+    const std::vector<gp_Pnt> pb = sample(b);
+
+    double best = -1.0;
+    for (const gp_Pnt& p : pa) {
+        for (const gp_Pnt& q : pb) {
+            const double d = p.SquareDistance(q);
+            if (d > best) { best = d; p1 = p; p2 = q; }
+        }
+    }
+    return (best < 0.0) ? 0.0 : std::sqrt(best);
 }
 
 // --- single sub-shape ------------------------------------------------------
@@ -256,12 +298,31 @@ MeasureResult dispatchPair(const TopoDS_Shape& a, Cat ca,
         return r;
     }
 
-    // two circular edges -> center-to-center distance
+    // two circular edges -> center / min / max distance (SolidWorks dropdown)
     if (ca == Cat::EdgeCircle && cb == Cat::EdgeCircle) {
-        r.kind = MeasureKind::CenterDistance;
-        guarded(r, [&]{
-            fillDistance(r, Mayo::MeasureToolBRep::brepCenterDistance(a, b), opt.showXyz);
-        });
+        switch (opt.circleMode) {
+        case CircleDistanceMode::Minimum:
+            r.kind = MeasureKind::MinDistance;
+            guarded(r, [&]{
+                fillDistance(r, Mayo::MeasureToolBRep::brepMinDistance(a, b), opt.showXyz);
+            });
+            break;
+        case CircleDistanceMode::Maximum:
+            r.kind = MeasureKind::MaxDistance;
+            guarded(r, [&]{
+                gp_Pnt p1, p2;
+                const double d = maxDistanceBetweenEdges(a, b, p1, p2);
+                fillDistancePoints(r, p1, p2, d, opt.showXyz);
+            });
+            break;
+        case CircleDistanceMode::CenterToCenter:
+        default:
+            r.kind = MeasureKind::CenterDistance;
+            guarded(r, [&]{
+                fillDistance(r, Mayo::MeasureToolBRep::brepCenterDistance(a, b), opt.showXyz);
+            });
+            break;
+        }
         return r;
     }
 
@@ -386,6 +447,7 @@ const char* toString(MeasureKind kind)
     case MeasureKind::Circle:         return "Circle";
     case MeasureKind::Area:           return "Area";
     case MeasureKind::MinDistance:    return "MinDistance";
+    case MeasureKind::MaxDistance:    return "MaxDistance";
     case MeasureKind::CenterDistance: return "CenterDistance";
     case MeasureKind::Angle:          return "Angle";
     case MeasureKind::BoundingBox:    return "BoundingBox";
@@ -393,6 +455,38 @@ const char* toString(MeasureKind kind)
     case MeasureKind::SumArea:        return "SumArea";
     }
     return "None";
+}
+
+const char* toString(CircleDistanceMode mode)
+{
+    switch (mode) {
+    case CircleDistanceMode::CenterToCenter: return "center";
+    case CircleDistanceMode::Minimum:        return "min";
+    case CircleDistanceMode::Maximum:        return "max";
+    }
+    return "center";
+}
+
+bool parseCircleDistanceMode(const std::string& s, CircleDistanceMode& out)
+{
+    std::string k;
+    k.reserve(s.size());
+    for (char c : s)
+        k.push_back(char(std::tolower((unsigned char)c)));
+
+    if (k == "center" || k == "centre" || k == "center-to-center" || k == "c2c") {
+        out = CircleDistanceMode::CenterToCenter;
+        return true;
+    }
+    if (k == "min" || k == "minimum") {
+        out = CircleDistanceMode::Minimum;
+        return true;
+    }
+    if (k == "max" || k == "maximum") {
+        out = CircleDistanceMode::Maximum;
+        return true;
+    }
+    return false;
 }
 
 MeasureResult dispatch(const std::vector<TopoDS_Shape>& shapes, const MeasureOptions& opt)

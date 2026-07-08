@@ -64,6 +64,7 @@ Qt GUI (Argos)    argos-cli / (향후) MCP
 | 모서리 ×1 (직선/원) | 길이 / 지름·반경·중심 |
 | 면 ×1 (평면/원통) | 면적·둘레 / 지름·면적 |
 | 면 ×2 (평행) | 거리 |
+| 원 ×2 | 중심-중심 / 최소 / 최대 거리 (드롭다운 전환, SolidWorks식) |
 | 모서리·면 ×2 (비평행) | 각도 |
 | 다수 | 총 길이 / 총 면적 |
 
@@ -102,7 +103,7 @@ Qt GUI (Argos)    argos-cli / (향후) MCP
 ## 4. 헤드리스 CLI ✅
 
 ```
-argos-cli measure <file> [--vertex N | --edge N | --face N]... [--point-to-point] [--pretty]
+argos-cli measure <file> [--vertex N | --edge N | --face N]... [--point-to-point] [--circle-mode center|min|max] [--pretty]
 argos-cli section <file> [--plane xy|yz|zx] [--offset N] [--flip]
 argos-cli info    <file>
 ```
