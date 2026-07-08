@@ -28,6 +28,7 @@ enum class MeasureKind {
     Circle,           // 1 circular edge or cylindrical face -> radius/diameter/center
     Area,             // 1 face -> area
     MinDistance,      // 2 entities -> shortest distance (+ dX/dY/dZ)
+    MaxDistance,      // 2 circles -> farthest rim-to-rim distance (+ dX/dY/dZ)
     CenterDistance,   // 2 circles -> center-to-center distance
     Angle,            // 2 non-parallel linear edges / planar faces -> angle
     BoundingBox,      // 1 solid/compound -> AABB
@@ -72,11 +73,26 @@ struct MeasureResult {
     std::optional<Vec3>   bboxSize;
 };
 
+// How a two-circle (circular-edge) selection resolves its distance, mirroring
+// SolidWorks' Measure "distance" dropdown for arc/circle pairs.
+enum class CircleDistanceMode {
+    CenterToCenter,   // distance between the two circle centres (default)
+    Minimum,          // shortest rim-to-rim distance
+    Maximum           // farthest rim-to-rim distance
+};
+
+const char* toString(CircleDistanceMode mode);
+// Parse "center"/"min"/"max" (case-insensitive) into a mode; false if unknown.
+bool parseCircleDistanceMode(const std::string& s, CircleDistanceMode& out);
+
 // Options that influence dispatch behaviour.
 struct MeasureOptions {
     // For a 2-entity selection: force a point-to-point minimum distance even
     // when the pair would otherwise resolve to angle/center-distance.
     bool pointToPoint = false;
+    // For a two-circle selection: which rim/centre distance to report. Defaults
+    // to center-to-center, preserving the historical behaviour.
+    CircleDistanceMode circleMode = CircleDistanceMode::CenterToCenter;
     // Compute the |dX|,|dY|,|dZ| decomposition for distance results.
     bool showXyz = true;
     // Hint for human-facing display (GUI panel / CLI): number of decimals to

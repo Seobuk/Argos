@@ -19,11 +19,14 @@
 
 #include <AIS_Shape.hxx>
 #include <Bnd_Box.hxx>
+#include <BRepAdaptor_Curve.hxx>
 #include <BRepBndLib.hxx>
+#include <GeomAbs_CurveType.hxx>
 #include <Standard_Failure.hxx>
 #include <Standard_Version.hxx>
 #include <StdSelect_BRepOwner.hxx>
 #include <TopLoc_Location.hxx>
+#include <TopoDS.hxx>
 #include <TopoDS_Shape.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Trsf.hxx>
@@ -41,6 +44,7 @@
 #include <QtGui/QShortcut>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QCheckBox>
+#include <QtWidgets/QComboBox>
 #include <QtWidgets/QFormLayout>
 #include <QtWidgets/QFrame>
 #include <QtWidgets/QGridLayout>
@@ -94,6 +98,7 @@ MeasureType mayoTypeFromKind(argos::MeasureKind k)
     case argos::MeasureKind::Circle:         return MeasureType::CircleDiameter;
     case argos::MeasureKind::Area:           return MeasureType::Area;
     case argos::MeasureKind::MinDistance:    return MeasureType::MinDistance;
+    case argos::MeasureKind::MaxDistance:    return MeasureType::MinDistance; // reuse distance callout
     case argos::MeasureKind::CenterDistance: return MeasureType::CenterDistance;
     case argos::MeasureKind::Angle:          return MeasureType::Angle;
     case argos::MeasureKind::BoundingBox:    return MeasureType::BoundingBox;
@@ -138,6 +143,12 @@ QString formatArgosResult(const argos::MeasureResult& r)
         break;
     case argos::MeasureKind::MinDistance:
         s = QString("거리: %1 mm").arg(num(r.value.value_or(0)));
+        if (r.delta)
+            s += QString("\n  dX: %1  dY: %2  dZ: %3")
+                    .arg(num(r.delta->x), num(r.delta->y), num(r.delta->z));
+        break;
+    case argos::MeasureKind::MaxDistance:
+        s = QString("최대 거리: %1 mm").arg(num(r.value.value_or(0)));
         if (r.delta)
             s += QString("\n  dX: %1  dY: %2  dZ: %3")
                     .arg(num(r.delta->x), num(r.delta->y), num(r.delta->z));
@@ -187,6 +198,8 @@ QString formatArgosShort(const argos::MeasureResult& r)
         return QString("면적 %1 mm²").arg(num(r.value.value_or(0)));
     case argos::MeasureKind::MinDistance:
         return QString("거리 %1 mm").arg(num(r.value.value_or(0)));
+    case argos::MeasureKind::MaxDistance:
+        return QString("최대거리 %1 mm").arg(num(r.value.value_or(0)));
     case argos::MeasureKind::CenterDistance:
         return QString("중심거리 %1 mm").arg(num(r.value.value_or(0)));
     case argos::MeasureKind::Angle:
@@ -216,6 +229,7 @@ PrimaryReadout primaryReadout(const argos::MeasureResult& r)
     case K::Circle:         return { QStringLiteral("지름"), num(r.diameter.value_or(0)) + " mm" };
     case K::Area:           return { QStringLiteral("면적"), num(r.value.value_or(0)) + " mm²" };
     case K::MinDistance:    return { QStringLiteral("거리"), num(r.value.value_or(0)) + " mm" };
+    case K::MaxDistance:    return { QStringLiteral("최대 거리"), num(r.value.value_or(0)) + " mm" };
     case K::CenterDistance: return { QStringLiteral("중심간 거리"), num(r.value.value_or(0)) + " mm" };
     case K::Angle:          return { QStringLiteral("각도"), num(r.value.value_or(0)) + "°" };
     case K::BoundingBox:    return { QStringLiteral("경계 상자"),
@@ -398,6 +412,24 @@ WidgetMeasure::WidgetMeasure(GuiDocument* guiDoc, QWidget* parent)
         checkRow->addStretch(1);
         optionLayout->addLayout(checkRow);
 
+        // Argos: two-circle distance mode (center / min / max), SolidWorks-style.
+        // Shown only while the current selection resolves to a pair of circles.
+        m_circleModeRow = new QWidget(this);
+        auto circleRow = new QHBoxLayout(m_circleModeRow);
+        circleRow->setContentsMargins(0, 0, 0, 0);
+        auto circleLabel = new QLabel(tr("원-원 거리:"), this);
+        circleLabel->setStyleSheet("color: rgba(140,140,140,230);");
+        m_comboCircleMode = new QComboBox(this);
+        m_comboCircleMode->addItem(tr("중심-중심"), int(argos::CircleDistanceMode::CenterToCenter));
+        m_comboCircleMode->addItem(tr("최소"),      int(argos::CircleDistanceMode::Minimum));
+        m_comboCircleMode->addItem(tr("최대"),      int(argos::CircleDistanceMode::Maximum));
+        m_comboCircleMode->setToolTip(tr("두 원(호)을 선택했을 때 거리 계산 방식"));
+        circleRow->addWidget(circleLabel);
+        circleRow->addWidget(m_comboCircleMode);
+        circleRow->addStretch(1);
+        m_circleModeRow->setVisible(false);   // revealed by recompute() on a circle pair
+        optionLayout->addWidget(m_circleModeRow);
+
         optionLayout->addWidget(btnOverallSize);
 
         auto actionRow = new QHBoxLayout;
@@ -448,6 +480,8 @@ WidgetMeasure::WidgetMeasure(GuiDocument* guiDoc, QWidget* parent)
 
     QObject::connect(m_checkShowXyz, &QCheckBox::toggled, this, [this]{ this->recompute(false); });
     QObject::connect(m_checkPointToPoint, &QCheckBox::toggled, this, [this]{ this->recompute(false); });
+    QObject::connect(m_comboCircleMode, qOverload<int>(&QComboBox::currentIndexChanged), this,
+                     [this]{ this->recompute(false); });
 
     // Quick actions — all reuse existing engine/scene state; nothing is removed.
     auto copyText = [](const QString& text) {
@@ -751,6 +785,28 @@ void WidgetMeasure::recompute(bool addToHistory)
     argos::MeasureOptions opt;
     opt.showXyz = !m_checkShowXyz || m_checkShowXyz->isChecked();
     opt.pointToPoint = m_checkPointToPoint && m_checkPointToPoint->isChecked();
+    if (m_comboCircleMode)
+        opt.circleMode = argos::CircleDistanceMode(m_comboCircleMode->currentData().toInt());
+
+    // Reveal the SolidWorks-style circle-distance dropdown only when the current
+    // selection is a pair of circular edges (the only case where it applies).
+    auto isCircularEdge = [](const TopoDS_Shape& s) {
+        if (s.IsNull() || s.ShapeType() != TopAbs_EDGE)
+            return false;
+        try {
+            const BRepAdaptor_Curve c(TopoDS::Edge(s));
+            return c.GetType() == GeomAbs_Circle || c.GetType() == GeomAbs_Ellipse;
+        }
+        catch (const Standard_Failure&) {
+            return false;
+        }
+    };
+    const bool isCirclePair = shapes.size() == 2
+            && isCircularEdge(shapes[0]) && isCircularEdge(shapes[1]);
+    if (m_circleModeRow && m_circleModeRow->isVisible() != isCirclePair) {
+        m_circleModeRow->setVisible(isCirclePair);
+        emit sizeAdjustmentRequested();
+    }
 
     const argos::MeasureResult res = argos::dispatch(shapes, opt);
     if (!res.ok) {
