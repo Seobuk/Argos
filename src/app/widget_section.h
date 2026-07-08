@@ -15,6 +15,7 @@
 #include <AIS_Shape.hxx>
 #include <Bnd_Box.hxx>
 #include <Graphic3d_ClipPlane.hxx>
+#include <TopoDS_Compound.hxx>
 #include <TopoDS_Shape.hxx>
 #include <gp_Dir.hxx>
 
