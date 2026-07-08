@@ -7,13 +7,18 @@
 
 #include "../base/bnd_utils.h"
 #include "../base/math_utils.h"
+#include "../graphics/graphics_scene.h"
 #include "../graphics/graphics_utils.h"
 #include "../gui/gui_document.h"
 #include "../argos_core/section.h"
 
 #include <AIS_Shape.hxx>
+#include <BRepAlgoAPI_Section.hxx>
 #include <BRep_Builder.hxx>
+#include <Graphic3d_SequenceOfHClipPlane.hxx>
+#include <Graphic3d_ZLayerId.hxx>
 #include <Quantity_Color.hxx>
+#include <TopExp_Explorer.hxx>
 #include <TopoDS_Compound.hxx>
 #include <TopoDS_Shape.hxx>
 #include <gp.hxx>
@@ -100,6 +105,11 @@ WidgetSection::WidgetSection(GuiDocument* guiDoc, QWidget* parent)
     m_checkCapping->setChecked(true);
     root->addWidget(m_checkCapping);
 
+    m_checkOutline = new QCheckBox(tr("검정 테두리 (외곽선)"), this);
+    m_checkOutline->setChecked(true);
+    m_checkOutline->setToolTip(tr("절단면 경계를 검정색 선으로 강조합니다"));
+    root->addWidget(m_checkOutline);
+
     auto colorRow = new QHBoxLayout;
     colorRow->setSpacing(6);
     colorRow->addWidget(new QLabel(tr("캡 색상"), this));
@@ -157,8 +167,18 @@ WidgetSection::WidgetSection(GuiDocument* guiDoc, QWidget* parent)
 
     QObject::connect(btnFlip, &QPushButton::clicked, this, [this]{ this->applyFlip(); });
     QObject::connect(m_checkCapping, &QCheckBox::toggled, this, [this](bool on) { this->applyCapping(on); });
+    QObject::connect(m_checkOutline, &QCheckBox::toggled, this, [this](bool on) {
+        m_showOutline = on;
+        this->recomputeReadout();
+    });
 
     this->setPlane(Plane::XY, false);
+}
+
+WidgetSection::~WidgetSection()
+{
+    if (!m_outline.IsNull())
+        m_guiDoc->graphicsScene()->eraseObject(m_outline);
 }
 
 gp_Dir WidgetSection::baseNormal() const
@@ -227,6 +247,9 @@ void WidgetSection::setPlane(Plane p, bool keepOffset)
 void WidgetSection::applyOffset(double pos)
 {
     GraphicsUtils::Gfx3dClipPlane_setPosition(m_plane, pos);
+    // The outline is expensive to re-slice; hide it during the live drag and let
+    // recomputeReadout() (fired on release) redraw it at the settled position.
+    this->hideOutline();
     this->redraw();
 }
 
@@ -236,6 +259,7 @@ void WidgetSection::applyFlip()
     const gp_Dir n = m_flipped ? this->baseNormal().Reversed() : this->baseNormal();
     GraphicsUtils::Gfx3dClipPlane_setNormal(m_plane, n);
     GraphicsUtils::Gfx3dClipPlane_setPosition(m_plane, m_spin->value());
+    this->recomputeReadout();
     this->redraw();
 }
 
@@ -269,6 +293,7 @@ void WidgetSection::setSectionOn(bool on)
     }
     else {
         m_plane->SetOn(false);
+        this->hideOutline();
     }
 
     this->redraw();
@@ -283,16 +308,20 @@ void WidgetSection::setRanges(const Bnd_Box& box)
     this->setPlane(m_curPlane, !wasVoid);
 }
 
-void WidgetSection::recomputeReadout()
+int WidgetSection::collectDisplayedShapes(TopoDS_Compound& comp) const
 {
-    // Build a compound of all displayed BRep shapes and section it via argos_core.
-    TopoDS_Compound comp;
     BRep_Builder builder;
     builder.MakeCompound(comp);
     int count = 0;
     m_guiDoc->graphicsScene()->foreachDisplayedObject([&](const GraphicsObjectPtr& obj) {
         if (GuiDocument::isAisViewCubeObject(obj))
             return;
+
+        // Never feed our own outline back into the section input.
+        if (!m_outline.IsNull()
+            && static_cast<const void*>(obj.get()) == static_cast<const void*>(m_outline.get())) {
+            return;
+        }
 
         auto aisShape = OccHandle<AIS_Shape>::DownCast(obj);
         if (aisShape) {
@@ -304,9 +333,19 @@ void WidgetSection::recomputeReadout()
         }
     });
 
+    return count;
+}
+
+void WidgetSection::recomputeReadout()
+{
+    // Build a compound of all displayed BRep shapes and section it via argos_core.
+    TopoDS_Compound comp;
+    const int count = this->collectDisplayedShapes(comp);
+
     if (count == 0) {
         m_labelPerimeter->setText("-");
         m_labelEdges->setText("-");
+        this->updateOutline(TopoDS_Shape{});
         return;
     }
 
@@ -332,6 +371,68 @@ void WidgetSection::recomputeReadout()
         m_labelPerimeter->setText("-");
         m_labelEdges->setText("-");
     }
+
+    // Trace the section boundary as a crisp black outline over the capping fill.
+    this->updateOutline(comp);
+}
+
+void WidgetSection::hideOutline()
+{
+    if (!m_outline.IsNull())
+        m_guiDoc->graphicsScene()->setObjectVisible(m_outline, false);
+}
+
+void WidgetSection::updateOutline(const TopoDS_Shape& modelComp)
+{
+    GraphicsScene* scene = m_guiDoc->graphicsScene();
+
+    const bool want = m_showOutline && m_plane->IsOn() && !modelComp.IsNull();
+    TopoDS_Shape secShape;
+    if (want) {
+        try {
+            // Slice with the very plane driving the visual cut so the outline and
+            // the capping always coincide, whatever the offset/flip.
+            const gp_Pln pln = m_plane->ToPlane();
+            BRepAlgoAPI_Section sec(modelComp, pln, Standard_False);
+            sec.ComputePCurveOn1(Standard_False);
+            sec.Build();
+            if (sec.IsDone()) {
+                const TopoDS_Shape sh = sec.Shape();
+                if (TopExp_Explorer(sh, TopAbs_EDGE).More())
+                    secShape = sh;
+            }
+        }
+        catch (...) {
+            secShape.Nullify();
+        }
+    }
+
+    if (secShape.IsNull()) {
+        this->hideOutline();
+        this->redraw();
+        return;
+    }
+
+    if (m_outline.IsNull()) {
+        m_outline = new AIS_Shape(secShape);
+        m_outline->SetDisplayMode(0);   // wireframe: the section is edges only
+        m_outline->SetColor(Quantity_Color(0.0, 0.0, 0.0, Quantity_TOC_RGB));
+        m_outline->SetWidth(2.5);
+        // Draw on top of the capping and exempt it from the section clip plane so
+        // the whole boundary stays visible (the curve lies exactly on the plane).
+        m_outline->SetZLayer(Graphic3d_ZLayerId_Topmost);
+        auto exemptPlanes = makeOccHandle<Graphic3d_SequenceOfHClipPlane>();
+        exemptPlanes->SetOverrideGlobal(Standard_True);
+        m_outline->SetClipPlanes(exemptPlanes);
+        scene->addObject(m_outline, GraphicsScene::AddObjectDisableSelectionMode);
+    }
+    else {
+        m_outline->SetShape(secShape);
+        scene->recomputeObjectPresentation(m_outline);
+    }
+
+    scene->setObjectVisible(m_outline, true);
+    this->redraw();
 }
 
 void WidgetSection::redraw()
