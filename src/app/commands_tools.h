@@ -27,6 +27,17 @@ public:
     static constexpr std::string_view Name = "inspect-xde";
 };
 
+// Argos: export the current document as a 2D orthographic drawing (SVG / DXF)
+// using the Qt-free argos_core drawing engine (hidden-line removal).
+class CommandExportDrawing : public Command {
+public:
+    explicit CommandExportDrawing(IAppContext* context);
+    void execute() override;
+    bool getEnabledStatus() const override;
+
+    static constexpr std::string_view Name = "export-drawing";
+};
+
 class CommandEditOptions : public Command {
 public:
     explicit CommandEditOptions(IAppContext* context);

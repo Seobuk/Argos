@@ -133,6 +133,7 @@ void MainWindow::createCommands()
     // "Tools" commands
     this->addCommand<CommandSaveViewImage>();
     this->addCommand<CommandInspectXde>();
+    this->addCommand<CommandExportDrawing>();
     this->addCommand<CommandEditOptions>();
 
     // "Window" commands
@@ -190,6 +191,7 @@ void MainWindow::createMenus()
         auto menu = m_ui->menu_Tools;
         fnAddAction(menu, CommandSaveViewImage::Name);
         fnAddAction(menu, CommandInspectXde::Name);
+        fnAddAction(menu, CommandExportDrawing::Name);
         menu->addSeparator();
         fnAddAction(menu, CommandEditOptions::Name);
     }

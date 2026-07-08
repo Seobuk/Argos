@@ -112,7 +112,8 @@ Mayo에는 없는 기능입니다. OpenCASCADE의 **은선 제거(HLR, `HLRBRep`
 - **출력** ✅ **SVG**(열람용, 벡터) + **DXF R12**(AutoCAD 등 CAD 편집용). 은선은
   DASHED 레이어, 치수/텍스트는 별도 레이어.
 - **CLI** ✅ `argos-cli drawing <file> -o out.svg|out.dxf [옵션]`
-- **GUI** ⏳ (엔진·CLI 우선; 패널에서 "도면 내보내기"는 후속).
+- **GUI** ✅ **도구 → 2D 도면 내보내기…** — 형식(SVG/DXF/둘 다)·투상법·뷰·은선·치수를
+  고르는 다이얼로그에서 현재 문서를 도면으로 저장 (`CommandExportDrawing`).
 - **제약**: HLR은 정확 B-Rep 기반이라 STEP/IGES/BREP에서 동작(메시-only STL 제외).
   상세 피처 치수·단면 뷰·GD&T·BOM은 아직 ⏳.
 
