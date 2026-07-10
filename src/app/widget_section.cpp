@@ -12,18 +12,22 @@
 #include "../gui/gui_document.h"
 #include "../argos_core/section.h"
 
+#include <AIS_ConnectedInteractive.hxx>
 #include <AIS_Shape.hxx>
 #include <BRepAlgoAPI_Section.hxx>
 #include <BRep_Builder.hxx>
 #include <Graphic3d_SequenceOfHClipPlane.hxx>
 #include <Graphic3d_ZLayerId.hxx>
 #include <Quantity_Color.hxx>
+#include <Standard_Version.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopLoc_Location.hxx>
 #include <TopoDS_Compound.hxx>
 #include <TopoDS_Shape.hxx>
 #include <gp.hxx>
 #include <gp_Dir.hxx>
 #include <gp_Pln.hxx>
+#include <gp_Trsf.hxx>
 
 #include <QtCore/QSignalBlocker>
 #include <QtGui/QColor>
@@ -39,6 +43,48 @@
 #include <cmath>
 
 namespace Mayo {
+
+namespace {
+
+// Resolve a displayed graphics object to its BRep shape placed in world space.
+//
+// A part shown at the assembly root is a plain AIS_Shape; an instanced part is
+// an AIS_ConnectedInteractive that references a shared product shape and applies
+// its own placement transform. Either way the section CAP is produced by
+// clipping the TRANSFORMED presentation, so the outline must slice the shape at
+// that same world placement. Slicing the raw (untransformed) product -- and
+// skipping the connected instances entirely, as the old AIS_Shape-only path did
+// -- put the outline at the wrong spot and dropped most assembly parts.
+TopoDS_Shape worldPlacedShape(const GraphicsObjectPtr& obj)
+{
+    TopoDS_Shape shape;
+    if (auto aisShape = OccHandle<AIS_Shape>::DownCast(obj)) {
+        shape = aisShape->Shape();
+    }
+    else if (auto conn = OccHandle<AIS_ConnectedInteractive>::DownCast(obj)) {
+        if (auto ref = OccHandle<AIS_Shape>::DownCast(conn->ConnectedTo()))
+            shape = ref->Shape();
+    }
+
+    if (shape.IsNull())
+        return {};
+
+    TopLoc_Location loc(obj->Transformation());
+#if OCC_VERSION_HEX >= 0x070600
+    // TopoDS_Shape::Move() throws on a scale factor != 1 since OCCT 7.6; the cut
+    // only needs the rigid placement, so normalize the scale away.
+    const double absScale = std::abs(loc.Transformation().ScaleFactor());
+    const double scalePrec = TopLoc_Location::ScalePrec();
+    if (absScale < (1. - scalePrec) || absScale > (1. + scalePrec)) {
+        gp_Trsf trsf = loc.Transformation();
+        trsf.SetScaleFactor(1.);
+        loc = trsf;
+    }
+#endif
+    return loc.IsIdentity() ? shape : shape.Moved(loc);
+}
+
+} // namespace
 
 WidgetSection::WidgetSection(GuiDocument* guiDoc, QWidget* parent)
     : QWidget(parent),
@@ -323,13 +369,10 @@ int WidgetSection::collectDisplayedShapes(TopoDS_Compound& comp) const
             return;
         }
 
-        auto aisShape = OccHandle<AIS_Shape>::DownCast(obj);
-        if (aisShape) {
-            const TopoDS_Shape& s = aisShape->Shape();
-            if (!s.IsNull()) {
-                builder.Add(comp, s);
-                ++count;
-            }
+        const TopoDS_Shape s = worldPlacedShape(obj);
+        if (!s.IsNull()) {
+            builder.Add(comp, s);
+            ++count;
         }
     });
 
