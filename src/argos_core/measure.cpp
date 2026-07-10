@@ -167,7 +167,7 @@ double maxDistanceBetweenEdges(const TopoDS_Shape& a, const TopoDS_Shape& b,
 {
     constexpr int kSamples = 180;   // 1 sample / 2deg on a full circle
 
-    auto sample = [](const TopoDS_Shape& e) {
+    auto sample = [kSamples](const TopoDS_Shape& e) {
         std::vector<gp_Pnt> pts;
         BRepAdaptor_Curve c(TopoDS::Edge(e));
         const double u0 = c.FirstParameter();
