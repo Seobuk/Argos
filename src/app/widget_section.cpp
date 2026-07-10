@@ -9,18 +9,17 @@
 #include "../base/math_utils.h"
 #include "../graphics/graphics_scene.h"
 #include "../graphics/graphics_utils.h"
+#include "../gui/gui_application.h"
 #include "../gui/gui_document.h"
 #include "../argos_core/section.h"
 
 #include <AIS_ConnectedInteractive.hxx>
 #include <AIS_Shape.hxx>
-#include <BRepAlgoAPI_Section.hxx>
 #include <BRep_Builder.hxx>
 #include <Graphic3d_SequenceOfHClipPlane.hxx>
 #include <Graphic3d_ZLayerId.hxx>
 #include <Quantity_Color.hxx>
 #include <Standard_Version.hxx>
-#include <TopExp_Explorer.hxx>
 #include <TopLoc_Location.hxx>
 #include <TopoDS_Compound.hxx>
 #include <TopoDS_Shape.hxx>
@@ -29,8 +28,12 @@
 #include <gp_Pln.hxx>
 #include <gp_Trsf.hxx>
 
+#include <QtCore/QPointer>
 #include <QtCore/QSignalBlocker>
+#include <QtCore/QThreadPool>
+#include <QtCore/QTimer>
 #include <QtGui/QColor>
+#include <QtWidgets/QApplication>
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QDoubleSpinBox>
 #include <QtWidgets/QFormLayout>
@@ -202,28 +205,75 @@ WidgetSection::WidgetSection(GuiDocument* guiDoc, QWidget* parent)
         m_spin->setValue(pos);
         this->applyOffset(pos);
     });
-    QObject::connect(m_slider, &QSlider::sliderReleased, this, [this]{ this->recomputeReadout(); });
+    QObject::connect(m_slider, &QSlider::sliderReleased, this, [this]{ this->settleRecompute(); });
 
     QObject::connect(m_spin, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this](double p) {
         QSignalBlocker block(m_slider);
         m_slider->setValue(this->sliderFromPos(p));
         this->applyOffset(p);
     });
-    QObject::connect(m_spin, &QDoubleSpinBox::editingFinished, this, [this]{ this->recomputeReadout(); });
+    QObject::connect(m_spin, &QDoubleSpinBox::editingFinished, this, [this]{ this->settleRecompute(); });
 
     QObject::connect(btnFlip, &QPushButton::clicked, this, [this]{ this->applyFlip(); });
     QObject::connect(m_checkCapping, &QCheckBox::toggled, this, [this](bool on) { this->applyCapping(on); });
     QObject::connect(m_checkOutline, &QCheckBox::toggled, this, [this](bool on) {
         m_showOutline = on;
+        if (!on) {
+            this->hideOutline();
+            this->redraw();
+            return;
+        }
+        // A slice already in flight computes exactly the current state and
+        // applySliceResult() consults m_showOutline at apply time -- starting
+        // another slice here would only discard that work and double the wait.
+        if (m_sliceBusy)
+            return;
+        // Re-showing the border must not cost a re-slice: reuse the cached last
+        // slice while it still matches the current plane/scene state.
+        if (m_lastSliceGen == m_sliceGen && m_plane->IsOn()) {
+            if (!m_lastSectionShape.IsNull())
+                this->showOutline(m_lastSectionShape);
+            return;
+        }
         this->recomputeReadout();
     });
+
+    // Settle-recompute for the offset paths that never emit sliderReleased /
+    // editingFinished: slider keyboard steps and groove (page) clicks, spinbox
+    // up/down arrows. applyOffset() restarts this timer on every plane move.
+    m_settleTimer = new QTimer(this);
+    m_settleTimer->setSingleShot(true);
+    m_settleTimer->setInterval(400);
+    QObject::connect(m_settleTimer, &QTimer::timeout, this, [this]{ this->settleRecompute(); });
+
+    // On document close the GuiDocument is deleted synchronously while this
+    // widget is only deleteLater()'d: sever m_guiDoc immediately so a slice
+    // finishing in that window (and our own destructor) never dereferences the
+    // freed GraphicsScene.
+    m_connGuiDocErased = guiDoc->guiApplication()->signalGuiDocumentErased.connectSlot(
+        [this](GuiDocument* doc) {
+            if (doc == m_guiDoc) {
+                m_guiDoc = nullptr;
+                ++m_sliceGen;   // drop any in-flight slice result
+            }
+        });
+
+    // Hiding/showing parts changes what the cut goes through: recompute so the
+    // readout, the outline and the checkbox cache all track the visible set.
+    // (While the section is off this only bumps the generation, which is what
+    // keeps the outline cache honest.)
+    m_connNodesVisibility = guiDoc->signalNodesVisibilityChanged.connectSlot(
+        [this](const GuiDocument::MapVisibilityByTreeNodeId&) { this->recomputeReadout(); });
 
     this->setPlane(Plane::XY, false);
 }
 
 WidgetSection::~WidgetSection()
 {
-    if (!m_outline.IsNull())
+    m_connGuiDocErased.disconnect();
+    m_connNodesVisibility.disconnect();
+    // m_guiDoc is null when the document was erased first (document close).
+    if (m_guiDoc && !m_outline.IsNull())
         m_guiDoc->graphicsScene()->eraseObject(m_outline);
 }
 
@@ -293,8 +343,13 @@ void WidgetSection::setPlane(Plane p, bool keepOffset)
 void WidgetSection::applyOffset(double pos)
 {
     GraphicsUtils::Gfx3dClipPlane_setPosition(m_plane, pos);
-    // The outline is expensive to re-slice; hide it during the live drag and let
-    // recomputeReadout() (fired on release) redraw it at the settled position.
+    // The plane moved, so a slice possibly in flight no longer matches it: the
+    // generation bump makes its continuation drop the stale result. The outline
+    // stays hidden during the live drag; recomputeReadout() re-slices at the
+    // settled position -- fired by slider release / editing finished, or by the
+    // settle timer for the input paths that emit neither.
+    ++m_sliceGen;
+    m_settleTimer->start();
     this->hideOutline();
     this->redraw();
 }
@@ -305,8 +360,27 @@ void WidgetSection::applyFlip()
     const gp_Dir n = m_flipped ? this->baseNormal().Reversed() : this->baseNormal();
     GraphicsUtils::Gfx3dClipPlane_setNormal(m_plane, n);
     GraphicsUtils::Gfx3dClipPlane_setPosition(m_plane, m_spin->value());
-    this->recomputeReadout();
+    // A flip only swaps which side is kept -- the plane itself does not move, so
+    // a current readout/outline stays valid and needs no re-slice. If the state
+    // is stale, though (offset moved without a settled recompute yet), keep
+    // flip's old role as a refresh trigger.
+    this->settleRecompute();
     this->redraw();
+}
+
+void WidgetSection::settleRecompute()
+{
+    // An in-flight slice either already computes the current state or its
+    // continuation re-enters recomputeReadout() on the generation mismatch;
+    // starting another one here would only discard that work. Mid-drag, the
+    // release handler comes back through here.
+    if (m_sliceBusy || m_slider->isSliderDown())
+        return;
+
+    // Displayed labels/outline are current for this generation: a no-op slider
+    // click or spinbox focus-out must not blank them with a useless re-slice.
+    if (m_lastSliceGen != m_sliceGen)
+        this->recomputeReadout();
 }
 
 void WidgetSection::applyCapping(bool on)
@@ -339,6 +413,9 @@ void WidgetSection::setSectionOn(bool on)
     }
     else {
         m_plane->SetOn(false);
+        ++m_sliceGen;   // drop any in-flight slice result
+        m_labelPerimeter->setText("-");
+        m_labelEdges->setText("-");
         this->hideOutline();
     }
 
@@ -381,83 +458,116 @@ int WidgetSection::collectDisplayedShapes(TopoDS_Compound& comp) const
 
 void WidgetSection::recomputeReadout()
 {
-    // Build a compound of all displayed BRep shapes and section it via argos_core.
-    TopoDS_Compound comp;
-    const int count = this->collectDisplayedShapes(comp);
+    if (!m_guiDoc)
+        return;   // document already erased; the widget is pending deletion
 
-    if (count == 0) {
+    // Any recompute request obsoletes whatever slice may be in flight.
+    ++m_sliceGen;
+
+    if (!m_plane->IsOn()) {
+        // Section tool is off: nothing to read out. This early-out matters --
+        // the bounding-box-changed signal routes here on every scene change
+        // (model load, entity add/remove) even while the tool is inactive, and
+        // used to trigger a full model slice each time.
         m_labelPerimeter->setText("-");
         m_labelEdges->setText("-");
-        this->updateOutline(TopoDS_Shape{});
-        return;
-    }
-
-    argos::SectionState st;
-    st.plane = (m_curPlane == Plane::XY) ? argos::StandardPlane::XY
-             : (m_curPlane == Plane::YZ) ? argos::StandardPlane::YZ
-                                         : argos::StandardPlane::ZX;
-    st.offset = m_spin->value();
-    st.flipped = m_flipped;
-
-    try {
-        const argos::SectionResult r = argos::computeSection(comp, st);
-        if (r.ok) {
-            m_labelPerimeter->setText(QString::number(r.outlineLength, 'f', 2) + " mm");
-            m_labelEdges->setText(QString::number(r.edgeCount));
-        }
-        else {
-            m_labelPerimeter->setText("-");
-            m_labelEdges->setText("-");
-        }
-    }
-    catch (...) {
-        m_labelPerimeter->setText("-");
-        m_labelEdges->setText("-");
-    }
-
-    // Trace the section boundary as a crisp black outline over the capping fill.
-    this->updateOutline(comp);
-}
-
-void WidgetSection::hideOutline()
-{
-    if (!m_outline.IsNull())
-        m_guiDoc->graphicsScene()->setObjectVisible(m_outline, false);
-}
-
-void WidgetSection::updateOutline(const TopoDS_Shape& modelComp)
-{
-    GraphicsScene* scene = m_guiDoc->graphicsScene();
-
-    const bool want = m_showOutline && m_plane->IsOn() && !modelComp.IsNull();
-    TopoDS_Shape secShape;
-    if (want) {
-        try {
-            // Slice with the very plane driving the visual cut so the outline and
-            // the capping always coincide, whatever the offset/flip.
-            const gp_Pln pln = m_plane->ToPlane();
-            BRepAlgoAPI_Section sec(modelComp, pln, Standard_False);
-            sec.ComputePCurveOn1(Standard_False);
-            sec.Build();
-            if (sec.IsDone()) {
-                const TopoDS_Shape sh = sec.Shape();
-                if (TopExp_Explorer(sh, TopAbs_EDGE).More())
-                    secShape = sh;
-            }
-        }
-        catch (...) {
-            secShape.Nullify();
-        }
-    }
-
-    if (secShape.IsNull()) {
         this->hideOutline();
         this->redraw();
         return;
     }
 
+    // Build a compound of all displayed BRep shapes (cheap: shapes are shared
+    // handles). Must happen here on the UI thread -- it walks the AIS scene.
+    TopoDS_Compound comp;
+    const int count = this->collectDisplayedShapes(comp);
+    if (count == 0) {
+        m_labelPerimeter->setText("-");
+        m_labelEdges->setText("-");
+        this->hideOutline();
+        this->redraw();
+        return;
+    }
+
+    // Whatever is displayed now belongs to a previous plane/scene state: blank
+    // the readout and hide the outline for the duration of the slice, even when
+    // an in-flight slice forces us to wait (plane switches would otherwise keep
+    // showing the old plane's numbers and its floating outline).
+    m_labelPerimeter->setText(tr("계산 중…"));
+    m_labelEdges->setText(tr("계산 중…"));
+    this->hideOutline();
+    this->redraw();
+
+    if (m_sliceBusy)
+        return; // the in-flight continuation sees the generation bump and re-enters
+
+    // Slice with the very plane driving the visual cut so the outline and the
+    // capping always coincide, whatever the offset/flip.
+    const gp_Pln pln = m_plane->ToPlane();
+    const quint64 gen = m_sliceGen;
+    m_sliceBusy = true;
+
+    // ONE BRepAlgoAPI_Section pass on a pool thread feeds both the readout and
+    // the black outline (same off-thread pattern as the overall-size measure),
+    // so the UI never freezes however large the assembly is.
+    QPointer<WidgetSection> self(this);
+    QThreadPool::globalInstance()->start([self, comp, pln, gen]{
+        const argos::SectionResult r = argos::computeSection(comp, pln);
+        QMetaObject::invokeMethod(qApp, [self, r, gen]{
+            if (!self || !self->m_guiDoc)
+                return;   // widget gone, or its document died first (close race)
+            self->m_sliceBusy = false;
+            if (gen != self->m_sliceGen) {
+                // The plane/scene changed while slicing: drop the stale result
+                // and recompute with the settled state. Mid-drag, skip -- the
+                // slider-release handler will fire the recompute.
+                if (!self->m_slider->isSliderDown())
+                    self->recomputeReadout();
+                return;
+            }
+            self->applySliceResult(r);
+        });
+    });
+}
+
+void WidgetSection::applySliceResult(const argos::SectionResult& result)
+{
+    if (result.ok) {
+        m_labelPerimeter->setText(QString::number(result.outlineLength, 'f', 2) + " mm");
+        m_labelEdges->setText(QString::number(result.edgeCount));
+    }
+    else {
+        m_labelPerimeter->setText("-");
+        m_labelEdges->setText("-");
+    }
+
+    // Cache the slice so re-enabling the outline checkbox needs no re-slice.
+    m_lastSectionShape = result.shape;
+    m_lastSliceGen = m_sliceGen;
+
+    if (m_showOutline && m_plane->IsOn() && !result.shape.IsNull()) {
+        this->showOutline(result.shape);
+    }
+    else {
+        this->hideOutline();
+        this->redraw();
+    }
+}
+
+void WidgetSection::hideOutline()
+{
+    if (m_guiDoc && !m_outline.IsNull())
+        m_guiDoc->graphicsScene()->setObjectVisible(m_outline, false);
+}
+
+void WidgetSection::showOutline(const TopoDS_Shape& sectionCurves)
+{
+    if (!m_guiDoc)
+        return;
+
+    GraphicsScene* scene = m_guiDoc->graphicsScene();
+
     if (m_outline.IsNull()) {
-        m_outline = new AIS_Shape(secShape);
+        m_outline = new AIS_Shape(sectionCurves);
         m_outline->SetDisplayMode(0);   // wireframe: the section is edges only
         m_outline->SetColor(Quantity_Color(0.0, 0.0, 0.0, Quantity_TOC_RGB));
         m_outline->SetWidth(2.5);
@@ -470,7 +580,7 @@ void WidgetSection::updateOutline(const TopoDS_Shape& modelComp)
         scene->addObject(m_outline, GraphicsScene::AddObjectDisableSelectionMode);
     }
     else {
-        m_outline->SetShape(secShape);
+        m_outline->SetShape(sectionCurves);
         scene->recomputeObjectPresentation(m_outline);
     }
 
@@ -480,7 +590,9 @@ void WidgetSection::updateOutline(const TopoDS_Shape& modelComp)
 
 void WidgetSection::redraw()
 {
-    m_view.redraw();
+    // m_view holds raw pointers into the GuiDocument-owned scene.
+    if (m_guiDoc)
+        m_view.redraw();
 }
 
 } // namespace Mayo
