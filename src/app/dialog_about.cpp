@@ -29,6 +29,17 @@ DialogAbout::DialogAbout(QWidget* parent)
     m_ui->label_BuildDateTime->setText(m_ui->label_BuildDateTime->text().arg(__DATE__, __TIME__));
     m_ui->label_Qt->setText(m_ui->label_Qt->text().arg(QT_VERSION_STR));
     m_ui->label_Occ->setText(m_ui->label_Occ->text().arg(OCC_VERSION_COMPLETE));
+
+    // Argos: the release zip redistributes Qt/OCCT/Assimp DLLs, so the About box
+    // points at the bundled third-party notices (also shipped inside the zip).
+    auto labelNotices = new QLabel(this);
+    labelNotices->setTextFormat(Qt::RichText);
+    labelNotices->setOpenExternalLinks(true);
+    labelNotices->setText(tr(
+        "오픈소스 고지: <a href=\"https://github.com/Seobuk/Argos/blob/main/docs/THIRD-PARTY-NOTICES.md\">"
+        "THIRD-PARTY-NOTICES</a> (배포 zip에도 포함)"
+    ));
+    m_ui->layout_Infos->addWidget(labelNotices);
 }
 
 DialogAbout::~DialogAbout()

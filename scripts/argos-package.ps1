@@ -71,11 +71,18 @@ if (Test-Path $fontSrc) {
     Copy-Item $fontSrc (Join-Path $dist 'fonts') -Recurse -Force
 }
 
-# Docs + license notices (keep Mayo's permissive license).
-foreach ($doc in @('README.md','README.en.md','LICENSE.txt')) {
+# Docs + license + third-party notices. The zip redistributes Qt/OCCT/Assimp/
+# FreeType DLLs (LGPL and BSD/FTL), so their notices and license texts must ship
+# inside the zip, not just in the repo.
+foreach ($doc in @('README.md','README.en.md','LICENSE.txt','docs/THIRD-PARTY-NOTICES.md')) {
     $src = Join-Path $repo $doc
     if (Test-Path $src) { Copy-Item $src $dist -Force }
 }
+$lic = Join-Path $dist 'licenses'
+New-Item -ItemType Directory -Force -Path $lic | Out-Null
+Copy-Item (Join-Path $repo 'doc/3rdparty_licenses.md') $lic -Force
+Copy-Item (Join-Path $repo 'images/credits.txt') (Join-Path $lic 'icon-credits.txt') -Force
+Copy-Item (Join-Path $repo 'doc/licenses/OFL-NotoSansKR.txt') $lic -Force
 
 # Zip it.
 $zip = Join-Path $repo 'dist/Argos-win64.zip'
