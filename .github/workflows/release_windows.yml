@@ -144,6 +144,27 @@ jobs:
                     --config Release ^
                     --parallel ${{steps.cpu-cores.outputs.count}}
 
+        # Authenticode-sign the app executables BEFORE packaging so the zip and
+        # the installer both ship signed binaries. Renaming mayo.exe -> Argos.exe
+        # in the Package step keeps the signature valid. Skipped (build stays
+        # unsigned) until the WINDOWS_CERT_PFX_BASE64 secret is configured.
+        - name: Sign application binaries
+          shell: pwsh
+          env:
+              SIGN_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+              SIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+          run: |
+              if (-not $env:SIGN_PFX_BASE64) { Write-Host 'No WINDOWS_CERT_PFX_BASE64 secret -- shipping UNSIGNED (add the cert secret to enable Authenticode signing).'; exit 0 }
+              $pfx = Join-Path $env:RUNNER_TEMP 'argos-codesign.pfx'
+              [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SIGN_PFX_BASE64))
+              $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+              if (-not $signtool) { throw 'signtool.exe not found in the Windows SDK' }
+              $targets = @('build/Release/mayo.exe','build/Release/argos-cli.exe','build/Release/mayo-conv.exe') | Where-Object { Test-Path $_ }
+              & $signtool sign /f $pfx /p $env:SIGN_PFX_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $targets
+              if ($LASTEXITCODE -ne 0) { throw "signtool failed ($LASTEXITCODE)" }
+              Remove-Item $pfx -Force
+              Write-Host "Signed: $($targets -join ', ')"
+
         - name: Package
           shell: pwsh
           run: |
@@ -202,6 +223,25 @@ jobs:
                   /DDistDir="${{ github.workspace }}\dist\Argos" `
                   /DOutDir="${{ github.workspace }}\dist" `
                   installer\argos.iss
+
+        # Sign the installer itself (skipped without the cert secret).
+        - name: Sign installer
+          shell: pwsh
+          env:
+              SIGN_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+              SIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+          run: |
+              if (-not $env:SIGN_PFX_BASE64) { Write-Host 'No signing secret -- installer left unsigned.'; exit 0 }
+              $pfx = Join-Path $env:RUNNER_TEMP 'argos-codesign.pfx'
+              [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SIGN_PFX_BASE64))
+              $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+              if (-not $signtool) { throw 'signtool.exe not found in the Windows SDK' }
+              $setup = Get-ChildItem 'dist/Argos-Setup-*.exe' | Select-Object -First 1 -ExpandProperty FullName
+              if (-not $setup) { throw 'installer exe not found' }
+              & $signtool sign /f $pfx /p $env:SIGN_PFX_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $setup
+              if ($LASTEXITCODE -ne 0) { throw "signtool failed ($LASTEXITCODE)" }
+              Remove-Item $pfx -Force
+              Write-Host "Signed installer: $setup"
 
         - name: Upload build artifact
           uses: actions/upload-artifact@v4
