@@ -72,11 +72,13 @@ static GuiDocument::GradientBackground& defaultGradientBackground()
 // Successive hues advance by the golden angle, so each new color lands as far as
 // possible from all the previous ones -- neighbouring parts never look alike,
 // however many parts the assembly has.
+// Saturation is kept low so the palette stays in muted, neutral tones: parts
+// remain distinguishable by hue without the display turning garish.
 static Quantity_Color uniquePartColor(int index)
 {
     const double goldenRatioConjugate = 0.61803398874989484820;
     const double hue = std::fmod(index * goldenRatioConjugate, 1.) * 360.;
-    return Quantity_Color(hue, 0.55/*lightness*/, 0.75/*saturation*/, Quantity_TOC_HLS);
+    return Quantity_Color(hue, 0.62/*lightness*/, 0.28/*saturation*/, Quantity_TOC_HLS);
 }
 
 // Find the Up direction closest to current instead of `upStart`
