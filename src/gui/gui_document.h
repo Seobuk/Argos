@@ -104,6 +104,14 @@ public:
     double explodingFactor() const { return m_explodingFactor; }
     void setExplodingFactor(double t); // Must be in [0,1]
 
+    // -- Unique part colors (Inventor-style "구성요소 개별 색상")
+    // Paints every BRep part(product) in its own distinct color so parts are easy
+    // to tell apart in a crowded assembly. Display-only: the XCAF/XDE color and
+    // material attributes are NOT touched, so part data and exports are unchanged
+    // and switching the mode off restores the original appearance.
+    bool uniquePartColorsOn() const { return m_uniquePartColorsOn; }
+    void setUniquePartColorsOn(bool on);
+
     // -- Visibility of trihedron at world origin
     bool isOriginTrihedronVisible() const;
     void toggleOriginTrihedronVisibility();
@@ -193,6 +201,10 @@ private:
 
     void applyExplodingFactor(const GraphicsEntity& entity, double t);
 
+    // Applies(on=true) or removes(on=false) the display-only unique color of
+    // every BRep part product displayed by 'entity'
+    void applyUniquePartColors(const GraphicsEntity& entity, bool on);
+
     void v3dViewTrihedronDisplay(Aspect_TypeOfTriedronPosition corner);
     void configureViewCubeSizes();
 
@@ -215,6 +227,10 @@ private:
     std::unordered_map<TreeNodeId, CheckState> m_mapTreeNodeCheckState;
 
     double m_explodingFactor = 0.;
+    bool m_uniquePartColorsOn = false;
+    // Next hue index of the golden-angle color walk; persists across entities so
+    // a model added while the mode is on continues the sequence.
+    int m_uniquePartColorNext = 0;
 };
 
 } // namespace Mayo

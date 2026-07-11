@@ -22,11 +22,13 @@
 #include <AIS_ConnectedInteractive.hxx>
 #include <AIS_Trihedron.hxx>
 #include <XCAFDoc_ColorTool.hxx>
+#include <XCAFPrs_AISObject.hxx>
 #include <Geom_Axis2Placement.hxx>
 #include <Graphic3d_GraphicDriver.hxx>
 #include <V3d_TypeOfOrientation.hxx>
 
 #include <cmath>
+#include <unordered_set>
 
 namespace Mayo {
 
@@ -64,6 +66,17 @@ static GuiDocument::GradientBackground& defaultGradientBackground()
         Quantity_NOC_GRAY50, Quantity_NOC_GRAY60, Aspect_GFM_VER
     };
     return defaultGradientBackground;
+}
+
+// Distinct display color for the part at 'index' of the unique-part-colors walk.
+// Successive hues advance by the golden angle, so each new color lands as far as
+// possible from all the previous ones -- neighbouring parts never look alike,
+// however many parts the assembly has.
+static Quantity_Color uniquePartColor(int index)
+{
+    const double goldenRatioConjugate = 0.61803398874989484820;
+    const double hue = std::fmod(index * goldenRatioConjugate, 1.) * 360.;
+    return Quantity_Color(hue, 0.55/*lightness*/, 0.75/*saturation*/, Quantity_TOC_HLS);
 }
 
 // Find the Up direction closest to current instead of `upStart`
@@ -474,6 +487,67 @@ void GuiDocument::resetNodeColor(TreeNodeId nodeId)
     });
 }
 
+void GuiDocument::setUniquePartColorsOn(bool on)
+{
+    if (m_uniquePartColorsOn == on)
+        return;
+
+    m_uniquePartColorsOn = on;
+    m_uniquePartColorNext = 0;
+    for (const GraphicsEntity& entity : m_vecGraphicsEntity)
+        this->applyUniquePartColors(entity, on);
+
+    m_gfxScene.redraw();
+}
+
+void GuiDocument::applyUniquePartColors(const GraphicsEntity& entity, bool on)
+{
+    // Instances(AIS_ConnectedInteractive) share the presentation of their product
+    // XCAFPrs_AISObject, so the color override targets the PRODUCT, exactly once:
+    // repeated parts(e.g. all screws sharing one product) get the same color,
+    // which reads as "same part = same color" in the 3D view.
+    //
+    // Why not a plain SetColor(): XCAFPrs_AISObject(an AIS_ColoredShape) carries
+    // one sub-shape drawer per XDE style and SetColor() skips drawers owning a
+    // color, so on a colored STEP file it changes nothing. Instead:
+    //  - DispatchStyles(false) stops Compute() from re-reading XDE styles;
+    //  - ClearCustomAspects() drops the per-sub-shape style drawers;
+    //  - SetColor() then colors the whole part through the base drawer.
+    // All of it lives in the presentation layer only -- the XCAF document is
+    // never written to. Turning the mode off re-enables style syncing, and the
+    // recompute restores the original XDE appearance.
+    std::unordered_set<const void*> setProcessedProduct;
+    for (const GraphicsEntity::Object& object : entity.vecObject) {
+        auto aisLink = OccHandle<AIS_ConnectedInteractive>::DownCast(object.ptr);
+        OccHandle<AIS_InteractiveObject> product =
+            aisLink && aisLink->HasConnection() ?
+                aisLink->ConnectedTo() :
+                OccHandle<AIS_InteractiveObject>(object.ptr)
+        ;
+        auto xcafObject = OccHandle<XCAFPrs_AISObject>::DownCast(product);
+        if (!xcafObject)
+            continue; // Not a BRep part(e.g. mesh entity): left untouched
+
+        if (setProcessedProduct.insert(xcafObject.get()).second) {
+            if (on) {
+                xcafObject->DispatchStyles(false/*theToSyncStyles*/);
+                xcafObject->ClearCustomAspects();
+                xcafObject->SetColor(Internal::uniquePartColor(m_uniquePartColorNext++));
+            }
+            else {
+                xcafObject->UnsetColor();
+                xcafObject->DispatchStyles(true/*theToSyncStyles*/);
+                xcafObject->SetToUpdate();
+            }
+        }
+
+        if (aisLink && aisLink->HasConnection())
+            aisLink->ConnectedTo()->Redisplay(true);
+
+        m_gfxScene.recomputeObjectPresentation(object.ptr);
+    }
+}
+
 void GuiDocument::setExplodingFactor(double t)
 {
     m_explodingFactor = t;
@@ -800,6 +874,12 @@ void GuiDocument::mapEntity(TreeNodeId entityTreeNodeId)
     });
 
     m_vecGraphicsEntity.push_back(std::move(gfxEntity));
+
+    // A model imported while "구성요소 개별 색상" is active joins the color walk
+    if (m_uniquePartColorsOn) {
+        this->applyUniquePartColors(m_vecGraphicsEntity.back(), true);
+        m_gfxScene.redraw();
+    }
 }
 
 void GuiDocument::unmapEntity(TreeNodeId entityTreeNodeId)

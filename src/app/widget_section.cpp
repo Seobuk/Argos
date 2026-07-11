@@ -7,6 +7,7 @@
 
 #include "../base/bnd_utils.h"
 #include "../base/math_utils.h"
+#include "../graphics/graphics_object_driver.h"
 #include "../graphics/graphics_scene.h"
 #include "../graphics/graphics_utils.h"
 #include "../gui/gui_application.h"
@@ -437,14 +438,13 @@ int WidgetSection::collectDisplayedShapes(TopoDS_Compound& comp) const
     builder.MakeCompound(comp);
     int count = 0;
     m_guiDoc->graphicsScene()->foreachDisplayedObject([&](const GraphicsObjectPtr& obj) {
-        if (GuiDocument::isAisViewCubeObject(obj))
+        // Model objects only: every displayed part carries its GraphicsObjectDriver
+        // as AIS owner. This rejects the view cube, our own outline, and -- now that
+        // Measure runs alongside Section -- the measurement callout graphics (the
+        // bounding-box callout is a real AIS_Shape that would otherwise be sliced
+        // into the perimeter readout).
+        if (!GraphicsObjectDriver::get(obj))
             return;
-
-        // Never feed our own outline back into the section input.
-        if (!m_outline.IsNull()
-            && static_cast<const void*>(obj.get()) == static_cast<const void*>(m_outline.get())) {
-            return;
-        }
 
         const TopoDS_Shape s = worldPlacedShape(obj);
         if (!s.IsNull()) {
