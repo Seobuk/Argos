@@ -13,6 +13,7 @@
 #include "../qtcommon/qstring_conv.h"
 #include "app_module.h"
 #include "recent_files.h"
+#include "splash_screen.h"
 #include "theme.h"
 
 #include <algorithm>
@@ -613,6 +614,14 @@ CommandQuitApplication::CommandQuitApplication(IAppContext* context)
 
 void CommandQuitApplication::execute()
 {
+    // Argos: same as MainWindow::closeEvent() — closing documents can take long, keep the
+    // user informed with the shutdown splash(QApplication::quit() bypasses closeEvent)
+    if (!this->guiApp()->guiDocuments().empty()) {
+        SplashScreen* splash = SplashScreen::showScreen(this->widgetMain());
+        splash->setMessage(QString("Argos 종료하는 중"));
+        splash->trackDocumentsTeardown(this->guiApp());
+    }
+
     FileCommandTools::closeAllDocuments(this->context());
     QApplication::quit();
 }

@@ -31,6 +31,7 @@
 #include "mainwindow.h"
 #include "qtgui_utils.h"
 #include "qtopengl_utils.h"
+#include "splash_screen.h"
 #include "theme.h"
 #include "widget_model_tree.h"
 #include "widget_model_tree_builder_mesh.h"
@@ -322,6 +323,14 @@ static int runApp(QCoreApplication* qtApp)
     LogMessageHandler::instance().enableDebugLogs(args.includeDebugLogs);
     LogMessageHandler::instance().setOutputFilePath(args.filepathLog);
 
+    // Argos: startup(settings, OpenGL probing, OpenCASCADE init) can take a few seconds
+    // with nothing visible on screen — show the splash right away
+    SplashScreen* splash = nullptr;
+    if (!args.showSystemInformation) {
+        splash = SplashScreen::showScreen();
+        splash->setMessage(QString("Argos 시작하는 중"));
+    }
+
     // Initialize AppModule
     auto appModule = AppModule::get();
     appModule->settings()->setStorage(std::make_unique<QSettingsStorage>());
@@ -355,6 +364,9 @@ static int runApp(QCoreApplication* qtApp)
 #endif
 
     // Initialize Gui application
+    if (splash)
+        splash->setMessage(QString("그래픽 환경 준비 중"));
+
     auto guiApp = std::make_unique<GuiApplication>(app);
     initGui(guiApp.get());
 
@@ -408,6 +420,9 @@ static int runApp(QCoreApplication* qtApp)
     });
 
     // Create MainWindow
+    if (splash)
+        splash->setMessage(QString("화면 구성 중"));
+
     MainWindow mainWindow(guiApp.get());
     mainWindow.setWindowTitle(QCoreApplication::applicationName());
     appModule->signalMessage.connectSlot(&MainWindow::showMessage, &mainWindow);
@@ -425,10 +440,19 @@ static int runApp(QCoreApplication* qtApp)
         QTimer::singleShot(0, qtApp, [&]{ mainWindow.openDocumentsFromList(args.listFilepathToOpen); });
     }
 
+    // Close the startup splash once the event loop takes over(main window shown)
+    if (splash)
+        QTimer::singleShot(0, qtApp, []{ SplashScreen::closeScreen(); });
+
     appModule->settings()->resetAll();
     fnLoadAppSettings(appModule->settings());
     try {
         const int code = qtApp->exec();
+        // Argos: the shutdown splash(shown when the main window closed with documents still
+        // open) stays up while recent files/settings are persisted and the process exits
+        if (SplashScreen* shutdownSplash = SplashScreen::instance())
+            shutdownSplash->setMessage(QString("마무리하는 중"));
+
         appModule->recordRecentFiles(guiApp.get());
         appModule->settings()->save();
         return code;
