@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="640" height="500" viewBox="0 0 640 500">
+  <defs>
+    <!-- Almond eye in Greek vase style: cream sclera, black pupil, orange lids -->
+    <g id="eye">
+      <path d="M -30,0 Q -12,-16 2,-16 Q 16,-15 30,-2 Q 15,13 1,14 Q -14,13 -30,0 Z"
+            fill="#F6E9C5" stroke="#E8913C" stroke-width="3"/>
+      <circle cx="2" cy="-1" r="9" fill="#0D0B08"/>
+      <path d="M -32,-2 Q -12,-22 14,-19" fill="none" stroke="#E8913C" stroke-width="3" stroke-linecap="round"/>
+      <path d="M 30,-2 Q 40,-7 45,-14" fill="none" stroke="#E8913C" stroke-width="3" stroke-linecap="round"/>
+    </g>
+  </defs>
+
+  <!-- Outer black frame -->
+  <rect x="0" y="0" width="640" height="500" fill="#0D0B08"/>
+  <!-- Orange field -->
+  <rect x="20" y="20" width="600" height="410" fill="#F49B33"/>
+
+  <!-- ============ Black figure: hunched old man, profile facing left ============ -->
+  <path fill="#0D0B08" d="
+    M 205,52
+    C 170,60 148,80 138,106
+    C 133,116 131,127 132,136
+    Q 133,146 127,154
+    Q 120,162 124,168
+    L 80,200
+    Q 72,208 82,212
+    L 126,216
+    Q 132,218 129,223
+    Q 123,229 131,234
+    Q 137,238 131,243
+    Q 122,249 132,256
+    Q 139,260 134,265
+    Q 123,275 136,286
+    Q 147,294 163,299
+    C 179,305 197,309 211,313
+    C 217,338 227,360 247,376
+    C 225,388 208,404 202,430
+    L 620,430
+    C 618,376 600,322 548,286
+    C 498,252 428,248 374,268
+    C 353,250 343,228 344,206
+    L 388,192
+    Q 400,184 392,175
+    L 345,172
+    C 352,157 352,138 344,120
+    C 326,70 258,42 205,52
+    Z"/>
+
+  <!-- Bottom-left forearm mass -->
+  <path fill="#0D0B08" d="
+    M 36,430
+    C 52,396 96,376 152,380
+    C 204,384 244,406 258,430
+    Z"/>
+
+  <!-- Orange contour lines inside the silhouette (vase engraving feel) -->
+  <path d="M 148,250 Q 162,256 178,257" fill="none" stroke="#E8913C" stroke-width="3" stroke-linecap="round"/>
+  <path d="M 196,296 Q 214,304 234,306" fill="none" stroke="#E8913C" stroke-width="3" stroke-linecap="round"/>
+  <path d="M 372,292 Q 428,264 488,274" fill="none" stroke="#E8913C" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M 430,430 Q 442,362 512,334" fill="none" stroke="#E8913C" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M 548,430 Q 566,382 560,336" fill="none" stroke="#E8913C" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M 90,414 Q 140,392 200,398" fill="none" stroke="#E8913C" stroke-width="3.5" stroke-linecap="round"/>
+
+  <!-- ============ Eyes ============ -->
+  <!-- Skull dome -->
+  <use xlink:href="#eye" transform="translate(198,90) rotate(-8) scale(0.8)"/>
+  <use xlink:href="#eye" transform="translate(264,82) rotate(4) scale(0.85)"/>
+  <use xlink:href="#eye" transform="translate(314,116) rotate(24) scale(0.75)"/>
+  <use xlink:href="#eye" transform="translate(186,134) rotate(-4) scale(0.85)"/>
+  <use xlink:href="#eye" transform="translate(254,130) rotate(6) scale(0.85)"/>
+  <use xlink:href="#eye" transform="translate(304,166) rotate(14) scale(0.7)"/>
+  <!-- The "real" eye under the brow + one behind -->
+  <use xlink:href="#eye" transform="translate(162,186) rotate(-3) scale(0.75)"/>
+  <use xlink:href="#eye" transform="translate(234,186) rotate(5) scale(0.8)"/>
+  <!-- Cheek / jaw -->
+  <use xlink:href="#eye" transform="translate(212,250) rotate(10) scale(0.7)"/>
+  <!-- Neck / shoulder -->
+  <use xlink:href="#eye" transform="translate(318,248) rotate(32) scale(0.65)"/>
+  <use xlink:href="#eye" transform="translate(296,310) rotate(52) scale(0.7)"/>
+  <use xlink:href="#eye" transform="translate(336,352) rotate(35) scale(0.75)"/>
+  <!-- Back mass -->
+  <use xlink:href="#eye" transform="translate(452,312) rotate(8) scale(1.0)"/>
+  <use xlink:href="#eye" transform="translate(532,362) rotate(18) scale(1.05)"/>
+  <use xlink:href="#eye" transform="translate(456,392) rotate(4) scale(0.95)"/>
+  <use xlink:href="#eye" transform="translate(578,418) rotate(30) scale(0.8)"/>
+  <!-- Forearm -->
+  <use xlink:href="#eye" transform="translate(112,408) rotate(-8) scale(0.7)"/>
+  <use xlink:href="#eye" transform="translate(188,412) rotate(6) scale(0.65)"/>
+</svg>

@@ -100,6 +100,15 @@ WidgetGuiDocument::WidgetGuiDocument(GuiDocument* guiDoc, QWidget* parent)
     m_btnExplode = this->createViewBtn(widgetBtnsContents, Theme::Icon::Multiple, tr("조립체 분해"));
     m_btnExplode->setCheckable(true);
 
+    // Argos: Inventor-style "구성요소 개별 색상" — paints every part of the assembly
+    // in its own distinct color, display-only (the document/XCAF materials and
+    // colors are untouched, so exports and part data stay exactly as loaded).
+    m_btnPartColors = this->createViewBtn(
+        widgetBtnsContents, Theme::Icon::Palette,
+        tr("구성요소 개별 색상 — 부품마다 고유한 색으로 구분 (화면 표시 전용, 재질/데이터 불변)")
+    );
+    m_btnPartColors->setCheckable(true);
+
     m_btnMeasure = this->createViewBtn(widgetBtnsContents, Theme::Icon::Measure, tr("형상 측정 — 점·모서리·면 클릭 (단축키 M)"));
     m_btnMeasure->setCheckable(true);
 
@@ -111,6 +120,7 @@ WidgetGuiDocument::WidgetGuiDocument(GuiDocument* guiDoc, QWidget* parent)
     this->createMenuItemVisibility(widgetBtnsContents);
     layoutBtns->addWidget(m_btnGrid);
     layoutBtns->addWidget(m_btnExplode);
+    layoutBtns->addWidget(m_btnPartColors);
     layoutBtns->addWidget(m_btnMeasure);
     layoutBtns->addWidget(m_btnSection);
     m_widgetBtns = this->createWidgetPanelContainer(widgetBtnsContents);
@@ -150,6 +160,11 @@ WidgetGuiDocument::WidgetGuiDocument(GuiDocument* guiDoc, QWidget* parent)
     QObject::connect(m_btnExplode, &ButtonFlat::checked, this, &WidgetGuiDocument::toggleWidgetExplode);
     QObject::connect(m_btnMeasure, &ButtonFlat::checked, this, &WidgetGuiDocument::toggleWidgetMeasure);
     QObject::connect(m_btnSection, &ButtonFlat::checked, this, &WidgetGuiDocument::toggleWidgetSection);
+    // Display-only toggle: independent of the exclusive tool-panel buttons, so it
+    // combines freely with measure/section/explode.
+    QObject::connect(m_btnPartColors, &ButtonFlat::checked, this, [=](bool on) {
+        m_guiDoc->setUniquePartColorsOn(on);
+    });
 
     // Argos: keyboard shortcut "M" toggles the Measure tool. Scoped to the 3D
     // view (WidgetWithChildren) so it never hijacks typing elsewhere in the app.
@@ -228,10 +243,11 @@ QWidget* WidgetGuiDocument::createWidgetPanelContainer(QWidget* widgetContents)
 void WidgetGuiDocument::updageWidgetPanelControls(QWidget* panelWidget, ButtonFlat* btnPanel)
 {
     this->exclusiveButtonCheck(btnPanel);
-    if (panelWidget) {
+    if (panelWidget)
         panelWidget->parentWidget()->setVisible(btnPanel->isChecked());
-        this->layoutWidgetPanel(panelWidget);
-    }
+
+    // Re-layout all panels: showing/hiding one shifts its side-by-side neighbors.
+    this->layoutWidgetPanels();
 }
 
 void adjustWidgetSize(QWidget* widget)
@@ -248,7 +264,7 @@ void WidgetGuiDocument::toggleWidgetGrid(bool on)
         auto container = this->createWidgetPanelContainer(m_widgetGrid);
         QObject::connect(
             m_widgetGrid, &WidgetGrid::sizeAdjustmentRequested,
-            container, [=]{ adjustWidgetSize(m_widgetGrid); },
+            container, [=]{ adjustWidgetSize(m_widgetGrid); this->layoutWidgetPanels(); },
             Qt::QueuedConnection
         );
     }
@@ -263,7 +279,7 @@ void WidgetGuiDocument::toggleWidgetSection(bool on)
         auto container = this->createWidgetPanelContainer(m_widgetSection);
         QObject::connect(
             m_widgetSection, &WidgetSection::sizeAdjustmentRequested,
-            container, [=]{ adjustWidgetSize(m_widgetSection); },
+            container, [=]{ adjustWidgetSize(m_widgetSection); this->layoutWidgetPanels(); },
             Qt::QueuedConnection
         );
         m_guiDoc->signalGraphicsBoundingBoxChanged.connectSlot(&WidgetSection::setRanges, m_widgetSection);
@@ -293,7 +309,7 @@ void WidgetGuiDocument::toggleWidgetMeasure(bool on)
         auto container = this->createWidgetPanelContainer(m_widgetMeasure);
         QObject::connect(
             m_widgetMeasure, &WidgetMeasure::sizeAdjustmentRequested,
-            container, [=]{ adjustWidgetSize(m_widgetMeasure); },
+            container, [=]{ adjustWidgetSize(m_widgetMeasure); this->layoutWidgetPanels(); },
             Qt::QueuedConnection
         );
     }
@@ -309,31 +325,43 @@ void WidgetGuiDocument::exclusiveButtonCheck(const ButtonFlat* btnCheck)
     if (!btnCheck || !btnCheck->isChecked())
         return;
 
+    // Argos: Measure and Section are allowed to be active at the same time, so
+    // measurements can be taken directly on the sectioned model (섹션뷰에서 측정).
+    // Unchecking a ButtonFlat fires its `checked` signal, which would otherwise
+    // turn the section clip plane off the moment the measure tool opens.
+    auto fnCompatible = [=](const ButtonFlat* a, const ButtonFlat* b) {
+        return (a == m_btnMeasure && b == m_btnSection)
+            || (a == m_btnSection && b == m_btnMeasure);
+    };
+
     ButtonFlat* arrayToggleBtn[] = { m_btnGrid, m_btnExplode, m_btnMeasure, m_btnSection };
     for (ButtonFlat* btn : arrayToggleBtn) {
         assert(btn->isCheckable());
-        if (btn != btnCheck)
+        if (btn != btnCheck && !fnCompatible(btnCheck, btn))
             btn->setChecked(false);
-    }
-}
-
-void WidgetGuiDocument::layoutWidgetPanel(QWidget* panel)
-{
-    QWidget* widget = panel ? panel->parentWidget() : nullptr;
-    if (widget) {
-        const QRect ctrlRect = this->viewControlsRect();
-        const int margin = panel->devicePixelRatio() * Internal_widgetMargin;
-        widget->move(ctrlRect.left(), ctrlRect.bottom() + margin);
     }
 }
 
 void WidgetGuiDocument::layoutWidgetPanels()
 {
+    // Argos: Measure and Section can be open simultaneously, so the visible
+    // panels are laid out side by side (left to right, in toolbar-button order)
+    // below the view controls instead of all stacking on the same spot.
+    const QRect ctrlRect = this->viewControlsRect();
+    int xPos = ctrlRect.left();
     QWidget* widgetPanels[] = {
         m_widgetGrid, m_widgetExplodeAsm, m_widgetMeasure, m_widgetSection
     };
-    for (QWidget* panel : widgetPanels)
-        this->layoutWidgetPanel(panel);
+    for (QWidget* panel : widgetPanels) {
+        QWidget* container = panel ? panel->parentWidget() : nullptr;
+        if (!container)
+            continue;
+
+        const int margin = panel->devicePixelRatio() * Internal_widgetMargin;
+        container->move(xPos, ctrlRect.bottom() + margin);
+        if (container->isVisible())
+            xPos += container->frameGeometry().width() + margin;
+    }
 }
 
 ButtonFlat* WidgetGuiDocument::createViewBtn(QWidget* parent, Theme::Icon icon, const QString& tooltip) const

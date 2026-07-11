@@ -133,7 +133,7 @@ std::string to_json(const SectionState& s, int indent)
     return j.dump(indent, ' ', false, kReplace);
 }
 
-SectionResult computeSection(const TopoDS_Shape& shape, const SectionState& s)
+SectionResult computeSection(const TopoDS_Shape& shape, const gp_Pln& plane)
 {
     SectionResult r;
     if (shape.IsNull()) {
@@ -141,21 +141,22 @@ SectionResult computeSection(const TopoDS_Shape& shape, const SectionState& s)
         return r;
     }
 
-    if (!std::isfinite(s.offset)
-        || !std::isfinite(s.origin.x) || !std::isfinite(s.origin.y) || !std::isfinite(s.origin.z)
-        || !std::isfinite(s.customNormal.x) || !std::isfinite(s.customNormal.y) || !std::isfinite(s.customNormal.z)) {
-        r.error = "non-finite section parameters";
-        return r;
-    }
-
     try {
-        const Vec3 n = planeNormal(s);
-        const Vec3 p = planePoint(s);
-        const gp_Pln pln(gp_Pnt(p.x, p.y, p.z), gp_Dir(n.x, n.y, n.z));
-
-        BRepAlgoAPI_Section section(shape, pln, Standard_False);
-        section.ComputePCurveOn1(Standard_True);
+        BRepAlgoAPI_Section section(shape, plane, Standard_False);
+        // Pcurves-on-faces are pure cost here (nothing downstream reads them;
+        // measured >2x the whole slice time on assemblies). Approximation stays
+        // ON: it compresses walking-line intersections into compact B-splines,
+        // which is measurably FASTER end-to-end than the raw dense polylines
+        // (both to build and to measure/display) and keeps the perimeter exact
+        // on curved sections.
+        section.ComputePCurveOn1(Standard_False);
         section.Approximation(Standard_True);
+        // Intersect the faces on all cores.
+        section.SetRunParallel(Standard_True);
+        // Never touch the input shapes (boolean ops may otherwise bump
+        // sub-shape tolerances): callers slice geometry that is concurrently
+        // displayed, possibly from a worker thread.
+        section.SetNonDestructive(Standard_True);
         section.Build();
         if (!section.IsDone()) {
             r.error = "section algorithm failed";
@@ -174,6 +175,8 @@ SectionResult computeSection(const TopoDS_Shape& shape, const SectionState& s)
             r.outlineLength = 0.0;
             return r;
         }
+
+        r.shape = secShape;
 
         GProp_GProps lprops;
         BRepGProp::LinearProperties(secShape, lprops);
@@ -196,14 +199,31 @@ SectionResult computeSection(const TopoDS_Shape& shape, const SectionState& s)
     }
     catch (const Standard_Failure& e) {
         r.ok = false;
+        r.shape.Nullify();   // keep the invariant: shape is non-null only when ok
         r.error = e.GetMessageString() ? e.GetMessageString() : "OpenCASCADE section failure";
         return r;
     }
     catch (const std::exception& e) {
         r.ok = false;
+        r.shape.Nullify();
         r.error = e.what();
         return r;
     }
+}
+
+SectionResult computeSection(const TopoDS_Shape& shape, const SectionState& s)
+{
+    if (!std::isfinite(s.offset)
+        || !std::isfinite(s.origin.x) || !std::isfinite(s.origin.y) || !std::isfinite(s.origin.z)
+        || !std::isfinite(s.customNormal.x) || !std::isfinite(s.customNormal.y) || !std::isfinite(s.customNormal.z)) {
+        SectionResult r;
+        r.error = "non-finite section parameters";
+        return r;
+    }
+
+    const Vec3 n = planeNormal(s);
+    const Vec3 p = planePoint(s);
+    return computeSection(shape, gp_Pln(gp_Pnt(p.x, p.y, p.z), gp_Dir(n.x, n.y, n.z)));
 }
 
 std::string to_json(const SectionResult& r, int indent)

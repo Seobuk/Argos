@@ -45,32 +45,18 @@ CAMERA_VIEWS = [
 ISO_VIEWS = ["iso", "iso2", "iso3", "iso4"]
 
 
-def find_cli(explicit):
+def find_exe(name, explicit=None, path_fallback=True):
+    """Locate a bundled exe: explicit path, then build/dist next to this script,
+    then the bare name on PATH (if path_fallback). Returns None if not found and
+    no PATH fallback (used for the optional mayo-conv renderer)."""
     if explicit and os.path.isfile(explicit):
         return os.path.abspath(explicit)
     here = os.path.dirname(os.path.abspath(__file__))
-    for c in (
-        os.path.join(here, "..", "build", "Release", "argos-cli.exe"),
-        os.path.join(here, "..", "dist", "Argos", "argos-cli.exe"),
-        "argos-cli.exe",
-    ):
+    for c in (os.path.join(here, "..", "build", "Release", name),
+              os.path.join(here, "..", "dist", "Argos", name)):
         if os.path.isfile(c):
             return os.path.abspath(c)
-    return "argos-cli.exe"
-
-
-def find_conv(explicit=None):
-    """Locate mayo-conv.exe (used for headless, offscreen 3D rendering)."""
-    if explicit and os.path.isfile(explicit):
-        return os.path.abspath(explicit)
-    here = os.path.dirname(os.path.abspath(__file__))
-    for c in (
-        os.path.join(here, "..", "build", "Release", "mayo-conv.exe"),
-        os.path.join(here, "..", "dist", "Argos", "mayo-conv.exe"),
-    ):
-        if os.path.isfile(c):
-            return os.path.abspath(c)
-    return None
+    return name if path_fallback else None
 
 
 def render_views(conv, step, out_dir, width=1600, height=1200, reuse=False):
@@ -313,7 +299,7 @@ def main():
         print("[argos_report] file not found:", step)
         sys.exit(1)
 
-    cli = find_cli(a.cli)
+    cli = find_exe("argos-cli.exe", a.cli)
     stem = os.path.splitext(os.path.basename(step))[0]
     out_dir = a.out or os.path.join(os.path.dirname(step), stem + "_Argos_report")
     os.makedirs(out_dir, exist_ok=True)
@@ -356,7 +342,7 @@ def main():
 
     images = {}
     if not a.no_images:
-        images = render_views(find_conv(a.conv), step, out_dir, reuse=a.reuse)
+        images = render_views(find_exe("mayo-conv.exe", a.conv, path_fallback=False), step, out_dir, reuse=a.reuse)
         images = annotate_views(images, dg.get("bboxSize"), out_dir)
 
     pptx_path = os.path.join(out_dir, stem + "_report.pptx")

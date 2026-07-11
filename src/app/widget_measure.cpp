@@ -9,7 +9,9 @@
 #include "ui_widget_measure.h"
 
 #include "../base/cpp_utils.h"
+#include "../base/document.h"
 #include "../base/occ_handle.h"
+#include "../base/xcaf.h"
 #include "../gui/gui_document.h"
 #include "../measure/measure_tool_brep.h"
 #include "../qtcommon/qstring_conv.h"
@@ -17,16 +19,22 @@
 
 #include <AIS_Shape.hxx>
 #include <Bnd_Box.hxx>
+#include <BRepAdaptor_Curve.hxx>
+#include <BRepBndLib.hxx>
+#include <GeomAbs_CurveType.hxx>
 #include <Standard_Failure.hxx>
 #include <Standard_Version.hxx>
 #include <StdSelect_BRepOwner.hxx>
 #include <TopLoc_Location.hxx>
+#include <TopoDS.hxx>
 #include <TopoDS_Shape.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Trsf.hxx>
 
+#include <QtCore/QPointer>
 #include <QtCore/QSignalBlocker>
 #include <QtCore/QString>
+#include <QtCore/QThreadPool>
 #include <QtCore/QtDebug>
 #include <QtGui/QAction>
 #include <QtGui/QClipboard>
@@ -34,7 +42,9 @@
 #include <QtGui/QFontDatabase>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QShortcut>
+#include <QtWidgets/QApplication>
 #include <QtWidgets/QCheckBox>
+#include <QtWidgets/QComboBox>
 #include <QtWidgets/QFormLayout>
 #include <QtWidgets/QFrame>
 #include <QtWidgets/QGridLayout>
@@ -88,6 +98,7 @@ MeasureType mayoTypeFromKind(argos::MeasureKind k)
     case argos::MeasureKind::Circle:         return MeasureType::CircleDiameter;
     case argos::MeasureKind::Area:           return MeasureType::Area;
     case argos::MeasureKind::MinDistance:    return MeasureType::MinDistance;
+    case argos::MeasureKind::MaxDistance:    return MeasureType::MinDistance; // reuse distance callout
     case argos::MeasureKind::CenterDistance: return MeasureType::CenterDistance;
     case argos::MeasureKind::Angle:          return MeasureType::Angle;
     case argos::MeasureKind::BoundingBox:    return MeasureType::BoundingBox;
@@ -132,6 +143,12 @@ QString formatArgosResult(const argos::MeasureResult& r)
         break;
     case argos::MeasureKind::MinDistance:
         s = QString("거리: %1 mm").arg(num(r.value.value_or(0)));
+        if (r.delta)
+            s += QString("\n  dX: %1  dY: %2  dZ: %3")
+                    .arg(num(r.delta->x), num(r.delta->y), num(r.delta->z));
+        break;
+    case argos::MeasureKind::MaxDistance:
+        s = QString("최대 거리: %1 mm").arg(num(r.value.value_or(0)));
         if (r.delta)
             s += QString("\n  dX: %1  dY: %2  dZ: %3")
                     .arg(num(r.delta->x), num(r.delta->y), num(r.delta->z));
@@ -181,6 +198,8 @@ QString formatArgosShort(const argos::MeasureResult& r)
         return QString("면적 %1 mm²").arg(num(r.value.value_or(0)));
     case argos::MeasureKind::MinDistance:
         return QString("거리 %1 mm").arg(num(r.value.value_or(0)));
+    case argos::MeasureKind::MaxDistance:
+        return QString("최대거리 %1 mm").arg(num(r.value.value_or(0)));
     case argos::MeasureKind::CenterDistance:
         return QString("중심거리 %1 mm").arg(num(r.value.value_or(0)));
     case argos::MeasureKind::Angle:
@@ -210,6 +229,7 @@ PrimaryReadout primaryReadout(const argos::MeasureResult& r)
     case K::Circle:         return { QStringLiteral("지름"), num(r.diameter.value_or(0)) + " mm" };
     case K::Area:           return { QStringLiteral("면적"), num(r.value.value_or(0)) + " mm²" };
     case K::MinDistance:    return { QStringLiteral("거리"), num(r.value.value_or(0)) + " mm" };
+    case K::MaxDistance:    return { QStringLiteral("최대 거리"), num(r.value.value_or(0)) + " mm" };
     case K::CenterDistance: return { QStringLiteral("중심간 거리"), num(r.value.value_or(0)) + " mm" };
     case K::Angle:          return { QStringLiteral("각도"), num(r.value.value_or(0)) + "°" };
     case K::BoundingBox:    return { QStringLiteral("경계 상자"),
@@ -360,6 +380,7 @@ WidgetMeasure::WidgetMeasure(GuiDocument* guiDoc, QWidget* parent)
 
     auto btnOverallSize = new QPushButton(tr("전체 크기 측정 (최고·최저 높이)"), this);
     btnOverallSize->setToolTip(tr("지금 보이는 모델 전체의 가로·세로·높이와 제일 높은 곳/제일 낮은 곳을 한 번에 측정합니다"));
+    m_btnOverallSize = btnOverallSize;
 
     auto btnClearSel = new QPushButton(tr("선택 해제"), this);
     btnClearSel->setToolTip(tr("현재 선택을 비웁니다 (Esc)"));
@@ -390,6 +411,24 @@ WidgetMeasure::WidgetMeasure(GuiDocument* guiDoc, QWidget* parent)
         checkRow->addWidget(m_checkPointToPoint);
         checkRow->addStretch(1);
         optionLayout->addLayout(checkRow);
+
+        // Argos: two-circle distance mode (center / min / max), SolidWorks-style.
+        // Shown only while the current selection resolves to a pair of circles.
+        m_circleModeRow = new QWidget(this);
+        auto circleRow = new QHBoxLayout(m_circleModeRow);
+        circleRow->setContentsMargins(0, 0, 0, 0);
+        auto circleLabel = new QLabel(tr("원-원 거리:"), this);
+        circleLabel->setStyleSheet("color: rgba(140,140,140,230);");
+        m_comboCircleMode = new QComboBox(this);
+        m_comboCircleMode->addItem(tr("중심-중심"), int(argos::CircleDistanceMode::CenterToCenter));
+        m_comboCircleMode->addItem(tr("최소"),      int(argos::CircleDistanceMode::Minimum));
+        m_comboCircleMode->addItem(tr("최대"),      int(argos::CircleDistanceMode::Maximum));
+        m_comboCircleMode->setToolTip(tr("두 원(호)을 선택했을 때 거리 계산 방식"));
+        circleRow->addWidget(circleLabel);
+        circleRow->addWidget(m_comboCircleMode);
+        circleRow->addStretch(1);
+        m_circleModeRow->setVisible(false);   // revealed by recompute() on a circle pair
+        optionLayout->addWidget(m_circleModeRow);
 
         optionLayout->addWidget(btnOverallSize);
 
@@ -441,6 +480,8 @@ WidgetMeasure::WidgetMeasure(GuiDocument* guiDoc, QWidget* parent)
 
     QObject::connect(m_checkShowXyz, &QCheckBox::toggled, this, [this]{ this->recompute(false); });
     QObject::connect(m_checkPointToPoint, &QCheckBox::toggled, this, [this]{ this->recompute(false); });
+    QObject::connect(m_comboCircleMode, qOverload<int>(&QComboBox::currentIndexChanged), this,
+                     [this]{ this->recompute(false); });
 
     // Quick actions — all reuse existing engine/scene state; nothing is removed.
     auto copyText = [](const QString& text) {
@@ -521,6 +562,12 @@ void WidgetMeasure::setMeasureOn(bool on)
     else {
         this->clearAllMeasureDisplays();
         gfxScene->foreachDisplayedObject([=](const GraphicsObjectPtr& gfxObject) {
+            // Restore whole-shape selection on model objects only: helper graphics
+            // (view cube, section outline) keep their own selection setup -- an
+            // activateObjectSelection(0) would make the section outline pickable.
+            if (!GraphicsObjectDriver::get(gfxObject))
+                return;
+
             gfxScene->deactivateObjectSelection(gfxObject);
             gfxScene->activateObjectSelection(gfxObject, 0);
         });
@@ -656,8 +703,8 @@ void WidgetMeasure::onMeasureTypeChanged(int id)
     // Apply 3D selection modes required by the measure tool
     gfxScene->clearSelection();
     gfxScene->foreachDisplayedObject([=](const GraphicsObjectPtr& gfxObject) {
-        if (GuiDocument::isAisViewCubeObject(gfxObject))
-            return; // Skip
+        if (!GraphicsObjectDriver::get(gfxObject))
+            return; // Skip view cube and driver-less helper graphics
 
         gfxScene->deactivateObjectSelection(gfxObject);
         if (m_tool) {
@@ -697,6 +744,7 @@ MeasureDisplayConfig WidgetMeasure::currentMeasureDisplayConfig() const
     cfg.doubleToStringOptions.locale = AppModule::get()->stdLocale();
     cfg.doubleToStringOptions.decimalCount = AppModule::get()->defaultTextOptions().unitDecimals;
     cfg.devicePixelRatio = this->devicePixelRatioF();
+    cfg.showDeltaXyz = !m_checkShowXyz || m_checkShowXyz->isChecked();
     return cfg;
 }
 
@@ -743,6 +791,28 @@ void WidgetMeasure::recompute(bool addToHistory)
     argos::MeasureOptions opt;
     opt.showXyz = !m_checkShowXyz || m_checkShowXyz->isChecked();
     opt.pointToPoint = m_checkPointToPoint && m_checkPointToPoint->isChecked();
+    if (m_comboCircleMode)
+        opt.circleMode = argos::CircleDistanceMode(m_comboCircleMode->currentData().toInt());
+
+    // Reveal the SolidWorks-style circle-distance dropdown only when the current
+    // selection is a pair of circular edges (the only case where it applies).
+    auto isCircularEdge = [](const TopoDS_Shape& s) {
+        if (s.IsNull() || s.ShapeType() != TopAbs_EDGE)
+            return false;
+        try {
+            const BRepAdaptor_Curve c(TopoDS::Edge(s));
+            return c.GetType() == GeomAbs_Circle || c.GetType() == GeomAbs_Ellipse;
+        }
+        catch (const Standard_Failure&) {
+            return false;
+        }
+    };
+    const bool isCirclePair = shapes.size() == 2
+            && isCircularEdge(shapes[0]) && isCircularEdge(shapes[1]);
+    if (m_circleModeRow && m_circleModeRow->isVisible() != isCirclePair) {
+        m_circleModeRow->setVisible(isCirclePair);
+        emit sizeAdjustmentRequested();
+    }
 
     const argos::MeasureResult res = argos::dispatch(shapes, opt);
     if (!res.ok) {
@@ -819,6 +889,10 @@ void WidgetMeasure::onDocumentEntityAdded(TreeNodeId entityNodeId)
         for (int mode : modes)
             gfxScene->activateObjectSelection(gfxObject, mode);
     });
+
+    // The model changed — drop the cached overall bounding box so the next
+    // "전체 크기 측정" recomputes it.
+    m_overallBox.reset();
 }
 
 std::vector<int> WidgetMeasure::activeSelectionModes() const
@@ -839,7 +913,11 @@ void WidgetMeasure::applySelectionModes()
     auto gfxScene = m_guiDoc->graphicsScene();
     const std::vector<int> modes = this->activeSelectionModes();
     gfxScene->foreachDisplayedObject([&](const GraphicsObjectPtr& gfxObject) {
-        if (GuiDocument::isAisViewCubeObject(gfxObject))
+        // Model objects only(they carry their GraphicsObjectDriver as AIS owner):
+        // skips the view cube plus the driver-less helper graphics that can now
+        // coexist with the measure tool -- the section outline and the measurement
+        // callouts -- which must never become selectable measurement targets.
+        if (!GraphicsObjectDriver::get(gfxObject))
             return;
 
         gfxScene->deactivateObjectSelection(gfxObject);
@@ -851,12 +929,84 @@ void WidgetMeasure::applySelectionModes()
 
 void WidgetMeasure::measureOverallSize()
 {
+    // Already computing — ignore repeat clicks so we never stack parallel
+    // exact-surface passes (each one is CPU-heavy).
+    if (m_overallBusy)
+        return;
+
+    // Cache hit: the model hasn't changed since the last measure, so reuse the
+    // exact box — no recompute, no CPU spike, instant readout. Invalidated in
+    // onDocumentEntityAdded() whenever the document's shapes change.
+    if (m_overallBox) {
+        this->applyOverallSizeResult(*m_overallBox);
+        return;
+    }
+
+    // Snapshot the top-level B-Rep shapes on the UI thread (TopoDS_Shape is a
+    // handle, so this is a cheap shallow copy), then run the heavy exact-surface
+    // AddOptimal off the UI thread so the app never freezes on a big STEP.
+    // useTriangulation=false is deliberate: it gives the true geometric size
+    // (a Ø88 part reads 88.00, not the deflection-padded 88.43).
+    std::vector<TopoDS_Shape> shapes;
+    const DocumentPtr& doc = m_guiDoc->document();
+    if (doc) {
+        for (const TDF_Label& label : doc->xcaf().topLevelFreeShapes()) {
+            const TopoDS_Shape shape = XCaf::shape(label);
+            if (!shape.IsNull())
+                shapes.push_back(shape);
+        }
+    }
+
+    // Mesh-only document (e.g. STL): no B-Rep to crunch and the graphics box is
+    // already cached, so just finish synchronously — nothing heavy to offload.
+    if (shapes.empty()) {
+        this->applyOverallSizeResult(Bnd_Box{});
+        return;
+    }
+
+    // Disable the button and show progress on it while the exact-surface pass
+    // runs on a pool thread; the continuation restores it.
+    m_overallBusy = true;
+    m_btnOverallSize->setEnabled(false);
+    const QString origLabel = m_btnOverallSize->text();
+    m_btnOverallSize->setText(tr("전체 크기 측정 중…"));
+
+    QPointer<WidgetMeasure> self = this;
+    QThreadPool::globalInstance()->start([self, shapes, origLabel]{
+        Bnd_Box box;
+        try {
+            for (const TopoDS_Shape& shape : shapes)
+                BRepBndLib::AddOptimal(shape, box, false /*useTriangulation*/, false /*useShapeTolerance*/);
+        }
+        catch (...) {
+            // leave the box void; the UI-thread continuation falls back to the graphics box
+        }
+        // Hop back to the UI thread before touching any widget/graphics state.
+        QMetaObject::invokeMethod(qApp, [self, box, origLabel]{
+            if (!self)
+                return;
+            self->m_overallBusy = false;
+            self->m_btnOverallSize->setEnabled(true);
+            self->m_btnOverallSize->setText(origLabel);
+            self->applyOverallSizeResult(box);
+        });
+    });
+}
+
+void WidgetMeasure::applyOverallSizeResult(Bnd_Box box)
+{
     auto gfxScene = m_guiDoc->graphicsScene();
 
-    // Axis-aligned bounding box of the whole *visible* model (fall back to all
-    // graphics if nothing is flagged visible). The view cube is not part of this
-    // box (only entity graphics contribute to it).
-    Bnd_Box box = m_guiDoc->graphicsBoundingBox(GuiDocument::OnlyVisibleGraphics);
+    // Cache the exact B-Rep box for instant reuse on the next click. Only the
+    // expensive B-Rep box is cached; the graphics fallback below is already cheap
+    // and tracks live visibility, so it's recomputed each time.
+    if (!box.IsVoid())
+        m_overallBox = box;
+
+    // Fallback for mesh-only documents (e.g. STL) with no B-Rep: use the graphics
+    // box of the visible model, then all graphics.
+    if (box.IsVoid())
+        box = m_guiDoc->graphicsBoundingBox(GuiDocument::OnlyVisibleGraphics);
     if (box.IsVoid())
         box = m_guiDoc->graphicsBoundingBox(GuiDocument::AllGraphics);
 

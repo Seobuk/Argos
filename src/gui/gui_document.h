@@ -93,16 +93,24 @@ public:
     CheckState nodeVisibleState(TreeNodeId nodeId) const;
     void setNodeVisible(TreeNodeId nodeId, bool on);
 
-    // -- Color of document's tree nodes (visual override in the 3D view)
-    // Recolors all graphics objects of `nodeId`(deep node traversal). This is a
-    // display-only override; it does not alter the XCAF/document color attributes.
+    // -- Color of document's tree nodes
+    // Recolors all graphics objects of `nodeId`(deep node traversal) by writing the color into the
+    // XCAF/XDE color attributes, so it survives presentation recompute (and is kept on export).
     void setNodeColor(TreeNodeId nodeId, const Quantity_Color& color);
-    // Restores the node graphics to their original (material/XCAF) color.
+    // Clears the XCAF/XDE color of the node graphics (falls back to the default material color).
     void resetNodeColor(TreeNodeId nodeId);
 
     // -- Exploding
     double explodingFactor() const { return m_explodingFactor; }
     void setExplodingFactor(double t); // Must be in [0,1]
+
+    // -- Unique part colors (Inventor-style "구성요소 개별 색상")
+    // Paints every BRep part(product) in its own distinct color so parts are easy
+    // to tell apart in a crowded assembly. Display-only: the XCAF/XDE color and
+    // material attributes are NOT touched, so part data and exports are unchanged
+    // and switching the mode off restores the original appearance.
+    bool uniquePartColorsOn() const { return m_uniquePartColorsOn; }
+    void setUniquePartColorsOn(bool on);
 
     // -- Visibility of trihedron at world origin
     bool isOriginTrihedronVisible() const;
@@ -169,6 +177,11 @@ private:
     void mapEntity(TreeNodeId entityTreeNodeId);
     void unmapEntity(TreeNodeId entityTreeNodeId);
 
+    void foreachNodeColorTarget(
+            TreeNodeId nodeId,
+            const std::function<void(const TDF_Label&, const GraphicsObjectPtr&)>& fn
+    );
+
     struct GraphicsEntity {
         struct Object {
             explicit Object(const GraphicsObjectPtr& p) : ptr(p) {}
@@ -187,6 +200,10 @@ private:
     const GraphicsEntity* findGraphicsEntity(TreeNodeId entityTreeNodeId) const;
 
     void applyExplodingFactor(const GraphicsEntity& entity, double t);
+
+    // Applies(on=true) or removes(on=false) the display-only unique color of
+    // every BRep part product displayed by 'entity'
+    void applyUniquePartColors(const GraphicsEntity& entity, bool on);
 
     void v3dViewTrihedronDisplay(Aspect_TypeOfTriedronPosition corner);
     void configureViewCubeSizes();
@@ -210,6 +227,10 @@ private:
     std::unordered_map<TreeNodeId, CheckState> m_mapTreeNodeCheckState;
 
     double m_explodingFactor = 0.;
+    bool m_uniquePartColorsOn = false;
+    // Next hue index of the golden-angle color walk; persists across entities so
+    // a model added while the mode is on continues the sequence.
+    int m_uniquePartColorNext = 0;
 };
 
 } // namespace Mayo

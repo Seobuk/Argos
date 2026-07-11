@@ -18,6 +18,7 @@
 #include "commands_window.h"
 #include "commands_help.h"
 #include "dialog_task_manager.h"
+#include "splash_screen.h"
 #include "qtgui_utils.h"
 #include "qtwidgets_utils.h"
 #include "theme.h"
@@ -88,10 +89,23 @@ void MainWindow::showEvent(QShowEvent* event)
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
+    // Argos: closing documents below is synchronous on the UI thread(graphics teardown +
+    // recent-file thumbnail rendering) and can take long with big assemblies — show the
+    // shutdown splash so the application doesn't look frozen. The splash stays visible
+    // until the process exits
+    if (!m_guiApp->guiDocuments().empty()) {
+        SplashScreen* splash = SplashScreen::showScreen(this);
+        splash->setMessage(QString("Argos 종료하는 중"));
+        splash->trackDocumentsTeardown(m_guiApp);
+    }
+
     for (const auto& fn : m_onCloseCallbacks)
         fn();
 
     FileCommandTools::closeAllDocuments(m_appContext);
+    if (SplashScreen* splash = SplashScreen::instance())
+        splash->setMessage(QString("Argos 종료하는 중"));
+
     QMainWindow::closeEvent(event);
 }
 

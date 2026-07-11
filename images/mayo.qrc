@@ -8,6 +8,7 @@
         <file>appicon_64.png</file>
         <file>graphics/opencascade_hatch_1.png</file>
         <file>graphics/rotate_cursor.png</file>
+        <file>splash_argos.svg</file>
         <file>themes/classic/back-square.svg</file>
         <file>themes/classic/back.svg</file>
         <file>themes/classic/camera.svg</file>
@@ -78,6 +79,8 @@
         <file>themes/dark/reload.svg</file>
         <file>themes/classic/measure.svg</file>
         <file>themes/dark/measure.svg</file>
+        <file>themes/classic/palette.svg</file>
+        <file>themes/dark/palette.svg</file>
         <file>themes/classic/turn-ccw.svg</file>
         <file>themes/classic/turn-cw.svg</file>
         <file>themes/dark/turn-ccw.svg</file>

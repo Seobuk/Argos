@@ -119,6 +119,8 @@ Argos is built on the open source below. See **[THIRD-PARTY-NOTICES](docs/THIRD-
 | [Mayo](https://github.com/fougue/mayo) — fork base | BSD-2-Clause |
 | [Qt](https://www.qt.io) 6.8.3 | LGPL-3.0 |
 | [Open CASCADE](https://dev.opencascade.org) 7.9.0 | LGPL-2.1 + exception |
+| [Assimp](https://github.com/assimp/assimp) 6.0.5 | BSD-3-Clause |
+| [FreeType](https://freetype.org) — OCCT text rendering | FTL |
 | [nlohmann/json](https://github.com/nlohmann/json) 3.11.3 | MIT |
 | [fmt](https://github.com/fmtlib/fmt) · [Microsoft GSL](https://github.com/microsoft/GSL) · [magic_enum](https://github.com/Neargye/magic_enum) · [KDBindings](https://github.com/KDAB/KDBindings) · [miniply](https://github.com/vilya/miniply) | MIT |
 | [fast_float](https://github.com/fastfloat/fast_float) | Apache-2.0 / MIT / BSL-1.0 |

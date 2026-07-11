@@ -8,7 +8,9 @@
 #include <BRepTools.hxx>
 #include <BRep_Builder.hxx>
 #include <IGESControl_Reader.hxx>
+#include <Interface_Static.hxx>
 #include <STEPControl_Reader.hxx>
+#include <STEPControl_Writer.hxx>
 #include <Standard_Failure.hxx>
 #include <TopExp.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
@@ -99,6 +101,38 @@ TopoDS_Shape loadShape(const std::string& path, std::string* error)
     catch (const std::exception& e) {
         setError(error, std::string("error while loading: ") + e.what());
         return {};
+    }
+}
+
+bool writeStep(const std::string& path, const TopoDS_Shape& shape, std::string* error)
+{
+    if (shape.IsNull()) {
+        setError(error, "cannot write a null shape to STEP");
+        return false;
+    }
+    try {
+        // loadShape reads geometry into OCCT's native millimetres regardless of
+        // the source file's unit, so pin the writer to mm to round-trip 1:1.
+        Interface_Static::SetCVal("write.step.unit", "MM");
+        STEPControl_Writer writer;
+        if (writer.Transfer(shape, STEPControl_AsIs) != IFSelect_RetDone) {
+            setError(error, "failed to transfer shape for STEP write");
+            return false;
+        }
+        if (writer.Write(path.c_str()) != IFSelect_RetDone) {
+            setError(error, "failed to write STEP file: " + path);
+            return false;
+        }
+        return true;
+    }
+    catch (const Standard_Failure& e) {
+        setError(error, std::string("OpenCASCADE error while writing STEP: ") +
+                        (e.GetMessageString() ? e.GetMessageString() : "unknown"));
+        return false;
+    }
+    catch (const std::exception& e) {
+        setError(error, std::string("error while writing STEP: ") + e.what());
+        return false;
     }
 }
 

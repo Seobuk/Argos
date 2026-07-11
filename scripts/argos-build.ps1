@@ -42,7 +42,7 @@ Write-Host "== Configuring Argos ==" -ForegroundColor Cyan
     "-DCMAKE_PREFIX_PATH=$QtDir" `
     -DMayo_PostBuildCopyRuntimeDLLs=OFF `
     -DMayo_BuildConvCli=ON `
-    ("-DArgos_BuildCoreTests=" + ($(if ($Tests) { 'ON' } else { 'ON' }))) `
+    -DArgos_BuildCoreTests=ON `
     -DMayo_BuildTests=OFF
 if ($LASTEXITCODE -ne 0) { throw "configure failed ($LASTEXITCODE)" }
 

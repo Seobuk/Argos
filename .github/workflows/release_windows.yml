@@ -110,6 +110,13 @@ jobs:
         - name: Extract Assimp
           run: 7z x assimp-${{env.assimp_version}}.zip
 
+        # Korean UI font for the packaged app (best-effort: Argos falls back to
+        # the system font if the download fails, so this never blocks a release).
+        - name: Fetch Korean UI font (Noto Sans KR, SIL OFL)
+          shell: pwsh
+          continue-on-error: true
+          run: ./scripts/argos-fetch-font.ps1
+
         - name: Get count of CPU cores
           uses: SimenB/github-actions-cpu-cores@v1
           id: cpu-cores
@@ -163,10 +170,21 @@ jobs:
               windeployqt --release --no-translations --no-compiler-runtime "$dist/Argos.exe" *>&1 | Out-Null
               $ErrorActionPreference = $prevEAP
 
-              # Docs + license.
-              foreach ($doc in @('README.md','README.en.md','LICENSE.txt')) {
+              # Korean UI font (fetched by argos-fetch-font.ps1; optional).
+              if (Test-Path 'resources/fonts') {
+                  Copy-Item 'resources/fonts' "$dist/fonts" -Recurse -Force
+              }
+
+              # Docs + license + third-party notices. The zip redistributes
+              # Qt/OCCT/Assimp/FreeType DLLs (LGPL and BSD/FTL), so their notices
+              # and license texts must ship inside the zip, not just in the repo.
+              foreach ($doc in @('README.md','README.en.md','LICENSE.txt','docs/THIRD-PARTY-NOTICES.md')) {
                   if (Test-Path $doc) { Copy-Item $doc $dist -Force }
               }
+              New-Item -ItemType Directory -Force -Path "$dist/licenses" | Out-Null
+              Copy-Item 'doc/3rdparty_licenses.md' "$dist/licenses" -Force
+              Copy-Item 'images/credits.txt' "$dist/licenses/icon-credits.txt" -Force
+              Copy-Item 'doc/licenses/OFL-NotoSansKR.txt' "$dist/licenses" -Force
 
               if (Test-Path "dist/Argos-win64.zip") { Remove-Item -Force "dist/Argos-win64.zip" }
               Compress-Archive -Path "$dist/*" -DestinationPath "dist/Argos-win64.zip" -Force

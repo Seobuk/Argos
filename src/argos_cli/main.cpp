@@ -19,6 +19,12 @@
 #include "../argos_core/section.h"
 #include "../3rdparty/nlohmann/json.hpp"
 
+#include <BRepBuilderAPI_Transform.hxx>
+#include <gp_Ax1.hxx>
+#include <gp_Dir.hxx>
+#include <gp_Pnt.hxx>
+#include <gp_Trsf.hxx>
+
 #include <cmath>
 #include <filesystem>
 #include <iostream>
@@ -46,12 +52,17 @@ void printUsage()
         "  argos-cli section <file> [--plane xy|yz|zx] [--offset N] [--flip] [options]\n"
         "  argos-cli props   <file> [--density N] [--urdf] [--pretty]\n"
         "  argos-cli digest  <file> [--density N] [--pretty]\n"
-        "  argos-cli info    <file> [--pretty]\n\n"
+        "  argos-cli info    <file> [--pretty]\n"
+        "  argos-cli reorient <file> -o <out.step> [--rx D] [--ry D] [--rz D]\n\n"
+        "reorient options (rotate about global axes through the origin, degrees):\n"
+        "  -o, --out <path>   output STEP file (required)\n"
+        "  --rx / --ry / --rz D   rotation about X / Y / Z (e.g. left face -> front: --rz 90)\n\n"
         "measure selection (order matters; mix freely, SolidWorks-style):\n"
         "  --vertex N      select the N-th vertex (1-based)\n"
         "  --edge   N      select the N-th edge\n"
         "  --face   N      select the N-th face\n"
         "  --point-to-point   force minimum point-to-point distance for 2 entities\n"
+        "  --circle-mode M    for 2 circular edges: center|min|max distance (default center)\n"
         "  --no-xyz           omit the dX/dY/dZ decomposition\n\n"
         "section options:\n"
         "  --plane xy|yz|zx|custom   datum plane (default xy)\n"
@@ -97,6 +108,35 @@ bool parseDouble(const std::string& s, double& out)
     }
 }
 
+// Load the input file into 'out', or emit a JSON error and return false.
+bool loadOrEmit(const std::string& file, int indent, TopoDS_Shape& out)
+{
+    if (file.empty()) {
+        emitError("no input file given", indent);
+        return false;
+    }
+    std::string loadErr;
+    out = argos::loadShape(file, &loadErr);
+    if (out.IsNull()) {
+        emitError(loadErr.empty() ? "failed to load file" : loadErr, indent);
+        return false;
+    }
+    return true;
+}
+
+// Parse "--density N" (positive kg/m^3). Advances i past the value. Returns
+// false after emitting a JSON error.
+bool parseDensityArg(const std::vector<std::string>& args, size_t& i, int indent, double& density)
+{
+    double d = 0;
+    if (i + 1 >= args.size() || !parseDouble(args[++i], d) || d <= 0.0) {
+        emitError("invalid value after --density", indent);
+        return false;
+    }
+    density = d;
+    return true;
+}
+
 int doMeasure(const std::vector<std::string>& args)
 {
     std::string file;
@@ -125,6 +165,12 @@ int doMeasure(const std::vector<std::string>& args)
         else if (a == "--edge")           { if (!wantIndex(TopAbs_EDGE))   { parseFailed = true; break; } }
         else if (a == "--face")           { if (!wantIndex(TopAbs_FACE))   { parseFailed = true; break; } }
         else if (a == "--point-to-point") opt.pointToPoint = true;
+        else if (a == "--circle-mode") {
+            if (i + 1 >= args.size()
+                    || !argos::parseCircleDistanceMode(args[++i], opt.circleMode)) {
+                return emitError("invalid value after --circle-mode (use center|min|max)", indent);
+            }
+        }
         else if (a == "--no-xyz")         opt.showXyz = false;
         else if (a == "--pretty")         indent = 2;
         else if (!a.empty() && a[0] == '-') return emitError("unknown option: " + a, indent);
@@ -135,13 +181,9 @@ int doMeasure(const std::vector<std::string>& args)
     if (parseFailed)
         return 1; // wantIndex already emitted a JSON error
 
-    if (file.empty())
-        return emitError("no input file given", indent);
-
-    std::string loadErr;
-    const TopoDS_Shape shape = argos::loadShape(file, &loadErr);
-    if (shape.IsNull())
-        return emitError(loadErr.empty() ? "failed to load file" : loadErr, indent);
+    TopoDS_Shape shape;
+    if (!loadOrEmit(file, indent, shape))
+        return 1;
 
     if (selection.empty())
         return emitError("no sub-shape selected (use --vertex/--edge/--face)", indent);
@@ -175,13 +217,9 @@ int doInfo(const std::vector<std::string>& args)
         else if (file.empty() && !(a.size() && a[0] == '-')) file = a;
         else return emitError("unexpected argument: " + a, indent);
     }
-    if (file.empty())
-        return emitError("no input file given", indent);
-
-    std::string loadErr;
-    const TopoDS_Shape shape = argos::loadShape(file, &loadErr);
-    if (shape.IsNull())
-        return emitError(loadErr.empty() ? "failed to load file" : loadErr, indent);
+    TopoDS_Shape shape;
+    if (!loadOrEmit(file, indent, shape))
+        return 1;
 
     nlohmann::ordered_json j;
     j["ok"] = true;
@@ -240,13 +278,9 @@ int doSection(const std::vector<std::string>& args)
         else return emitError("unexpected argument: " + a, indent);
     }
 
-    if (file.empty())
-        return emitError("no input file given", indent);
-
-    std::string loadErr;
-    const TopoDS_Shape shape = argos::loadShape(file, &loadErr);
-    if (shape.IsNull())
-        return emitError(loadErr.empty() ? "failed to load file" : loadErr, indent);
+    TopoDS_Shape shape;
+    if (!loadOrEmit(file, indent, shape))
+        return 1;
 
     const argos::SectionResult res = argos::computeSection(shape, st);
 
@@ -272,10 +306,7 @@ int doProps(const std::vector<std::string>& args)
     for (size_t i = 2; i < args.size(); ++i) {
         const std::string& a = args[i];
         if (a == "--density") {
-            double d = 0;
-            if (i + 1 >= args.size() || !parseDouble(args[++i], d) || d <= 0.0)
-                return emitError("invalid value after --density", indent);
-            density = d;
+            if (!parseDensityArg(args, i, indent, density)) return 1;
         }
         else if (a == "--urdf")        urdf = true;
         else if (a == "--pretty")      indent = 2;
@@ -284,13 +315,9 @@ int doProps(const std::vector<std::string>& args)
         else return emitError("unexpected argument: " + a, indent);
     }
 
-    if (file.empty())
-        return emitError("no input file given", indent);
-
-    std::string loadErr;
-    const TopoDS_Shape shape = argos::loadShape(file, &loadErr);
-    if (shape.IsNull())
-        return emitError(loadErr.empty() ? "failed to load file" : loadErr, indent);
+    TopoDS_Shape shape;
+    if (!loadOrEmit(file, indent, shape))
+        return 1;
 
     const argos::MassProperties mp = argos::massProperties(shape, density);
     if (urdf) {
@@ -310,27 +337,91 @@ int doDigest(const std::vector<std::string>& args)
     for (size_t i = 2; i < args.size(); ++i) {
         const std::string& a = args[i];
         if (a == "--density") {
-            double d = 0;
-            if (i + 1 >= args.size() || !parseDouble(args[++i], d) || d <= 0.0)
-                return emitError("invalid value after --density", indent);
-            density = d;
+            if (!parseDensityArg(args, i, indent, density)) return 1;
         }
         else if (a == "--pretty")           indent = 2;
         else if (!a.empty() && a[0] == '-') return emitError("unknown option: " + a, indent);
         else if (file.empty())              file = a;
         else return emitError("unexpected argument: " + a, indent);
     }
-    if (file.empty())
-        return emitError("no input file given", indent);
-
-    std::string loadErr;
-    const TopoDS_Shape shape = argos::loadShape(file, &loadErr);
-    if (shape.IsNull())
-        return emitError(loadErr.empty() ? "failed to load file" : loadErr, indent);
+    TopoDS_Shape shape;
+    if (!loadOrEmit(file, indent, shape))
+        return 1;
 
     const argos::DigestResult dg = argos::digest(shape, density);
     std::cout << argos::to_json(dg, indent) << std::endl;
     return dg.ok ? 0 : 1;
+}
+
+// Rotate a model about the global X/Y/Z axes (through the origin) and write the
+// result to a new STEP file. Used to fix parts whose "front" face is authored
+// pointing sideways (e.g. the view cube reads 좌측 instead of 정면).
+int doReorient(const std::vector<std::string>& args)
+{
+    std::string file, out;
+    double rx = 0, ry = 0, rz = 0;
+    int indent = -1;
+
+    for (size_t i = 2; i < args.size(); ++i) {
+        const std::string& a = args[i];
+        auto wantDeg = [&](double& dst) -> bool {
+            double d = 0;
+            if (i + 1 >= args.size() || !parseDouble(args[++i], d)) {
+                emitError("invalid angle after " + a, indent);
+                return false;
+            }
+            dst = d;
+            return true;
+        };
+
+        if (a == "--rx")                  { if (!wantDeg(rx)) return 1; }
+        else if (a == "--ry")             { if (!wantDeg(ry)) return 1; }
+        else if (a == "--rz")             { if (!wantDeg(rz)) return 1; }
+        else if (a == "-o" || a == "--out") {
+            if (i + 1 >= args.size()) return emitError("missing path after " + a, indent);
+            out = args[++i];
+        }
+        else if (a == "--pretty")         indent = 2;
+        else if (!a.empty() && a[0] == '-') return emitError("unknown option: " + a, indent);
+        else if (file.empty())            file = a;
+        else return emitError("unexpected argument: " + a, indent);
+    }
+
+    if (out.empty())
+        return emitError("missing output path (use -o <out.step>)", indent);
+
+    TopoDS_Shape shape;
+    if (!loadOrEmit(file, indent, shape))
+        return 1;
+
+    // Compose X, then Y, then Z rotations about axes through the origin.
+    const double d2r = std::acos(-1.0) / 180.0;
+    gp_Trsf t;
+    auto rot = [&](const gp_Dir& axis, double deg) {
+        if (deg != 0.0) {
+            gp_Trsf r;
+            r.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), axis), deg * d2r);
+            t = r * t;
+        }
+    };
+    rot(gp_Dir(1, 0, 0), rx);
+    rot(gp_Dir(0, 1, 0), ry);
+    rot(gp_Dir(0, 0, 1), rz);
+
+    const TopoDS_Shape moved = BRepBuilderAPI_Transform(shape, t, true).Shape();
+
+    std::string werr;
+    if (!argos::writeStep(out, moved, &werr))
+        return emitError(werr.empty() ? "failed to write STEP" : werr, indent);
+
+    nlohmann::ordered_json j;
+    j["ok"] = true;
+    j["input"] = file;
+    j["output"] = out;
+    j["rotation_deg"] = { {"x", rx}, {"y", ry}, {"z", rz} };
+    std::cout << j.dump(indent, ' ', false, nlohmann::ordered_json::error_handler_t::replace)
+              << std::endl;
+    return 0;
 }
 
 int runMain(const std::vector<std::string>& args)
@@ -351,6 +442,8 @@ int runMain(const std::vector<std::string>& args)
         return doProps(args);
     if (cmd == "digest")
         return doDigest(args);
+    if (cmd == "reorient")
+        return doReorient(args);
     if (cmd == "-h" || cmd == "--help" || cmd == "help") {
         printUsage();
         return 0;

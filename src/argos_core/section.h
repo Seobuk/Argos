@@ -15,6 +15,8 @@
 #include <optional>
 #include <string>
 
+class gp_Pln;
+
 namespace argos {
 
 // Standard datum planes (normal axis in parentheses) or an arbitrary normal.
@@ -53,10 +55,20 @@ struct SectionResult {
     std::optional<Vec3> bboxMin;
     std::optional<Vec3> bboxMax;
     std::optional<Vec3> bboxSize;
+    // The section curves themselves (a compound of edges in world space), so a
+    // caller that also wants to DISPLAY the cut boundary reuses this single
+    // slice instead of running a second BRepAlgoAPI_Section. Null when the
+    // plane misses the shape (edgeCount == 0). Not serialized by to_json().
+    TopoDS_Shape shape;
 };
 
 // Slice 'shape' with the section plane; never throws (errors via ok/error).
 SectionResult computeSection(const TopoDS_Shape& shape, const SectionState& s);
+
+// Same, but slicing with an explicit OCCT plane. This lets a GUI pass the very
+// gp_Pln that drives its visual clipping so readout and display coincide
+// exactly; the SectionState overload wraps this one.
+SectionResult computeSection(const TopoDS_Shape& shape, const gp_Pln& plane);
 
 std::string to_json(const SectionResult& r, int indent = -1);
 
