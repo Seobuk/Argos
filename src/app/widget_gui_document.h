@@ -64,7 +64,6 @@ private:
     void popupViewOrientationMenu(const QPoint& globalPos);
     QRect viewControlsRect() const;
     void layoutViewControls();
-    void layoutWidgetPanel(QWidget* panel);
     void layoutWidgetPanels();
     // Argos: re-anchor the mouse-coordinate readout to the view bottom-right.
     void layoutMouseCoords();
@@ -89,6 +88,7 @@ private:
     ButtonFlat* m_btnFitAll = nullptr;
     ButtonFlat* m_btnGrid = nullptr;
     ButtonFlat* m_btnExplode = nullptr;
+    ButtonFlat* m_btnPartColors = nullptr; // Argos: per-part unique display colors
     ButtonFlat* m_btnMeasure = nullptr;
     ButtonFlat* m_btnSection = nullptr;
 };

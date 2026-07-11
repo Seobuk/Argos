@@ -78,6 +78,8 @@
         <file>themes/dark/reload.svg</file>
         <file>themes/classic/measure.svg</file>
         <file>themes/dark/measure.svg</file>
+        <file>themes/classic/palette.svg</file>
+        <file>themes/dark/palette.svg</file>
         <file>themes/classic/turn-ccw.svg</file>
         <file>themes/classic/turn-cw.svg</file>
         <file>themes/dark/turn-ccw.svg</file>

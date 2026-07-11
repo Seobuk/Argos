@@ -562,6 +562,12 @@ void WidgetMeasure::setMeasureOn(bool on)
     else {
         this->clearAllMeasureDisplays();
         gfxScene->foreachDisplayedObject([=](const GraphicsObjectPtr& gfxObject) {
+            // Restore whole-shape selection on model objects only: helper graphics
+            // (view cube, section outline) keep their own selection setup -- an
+            // activateObjectSelection(0) would make the section outline pickable.
+            if (!GraphicsObjectDriver::get(gfxObject))
+                return;
+
             gfxScene->deactivateObjectSelection(gfxObject);
             gfxScene->activateObjectSelection(gfxObject, 0);
         });
@@ -697,8 +703,8 @@ void WidgetMeasure::onMeasureTypeChanged(int id)
     // Apply 3D selection modes required by the measure tool
     gfxScene->clearSelection();
     gfxScene->foreachDisplayedObject([=](const GraphicsObjectPtr& gfxObject) {
-        if (GuiDocument::isAisViewCubeObject(gfxObject))
-            return; // Skip
+        if (!GraphicsObjectDriver::get(gfxObject))
+            return; // Skip view cube and driver-less helper graphics
 
         gfxScene->deactivateObjectSelection(gfxObject);
         if (m_tool) {
@@ -907,7 +913,11 @@ void WidgetMeasure::applySelectionModes()
     auto gfxScene = m_guiDoc->graphicsScene();
     const std::vector<int> modes = this->activeSelectionModes();
     gfxScene->foreachDisplayedObject([&](const GraphicsObjectPtr& gfxObject) {
-        if (GuiDocument::isAisViewCubeObject(gfxObject))
+        // Model objects only(they carry their GraphicsObjectDriver as AIS owner):
+        // skips the view cube plus the driver-less helper graphics that can now
+        // coexist with the measure tool -- the section outline and the measurement
+        // callouts -- which must never become selectable measurement targets.
+        if (!GraphicsObjectDriver::get(gfxObject))
             return;
 
         gfxScene->deactivateObjectSelection(gfxObject);

@@ -240,6 +240,7 @@ QString iconFileName(Theme::Icon icn)
     case Theme::Icon::ZoomOut: return "zoom-out.svg";
     case Theme::Icon::ClipPlane: return "clip-plane.svg";
     case Theme::Icon::Measure: return "measure.svg";
+    case Theme::Icon::Palette: return "palette.svg";
     case Theme::Icon::View3dIso: return "view-iso.svg";
     case Theme::Icon::View3dLeft: return "view-left.svg";
     case Theme::Icon::View3dRight: return "view-right.svg";

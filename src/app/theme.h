@@ -55,7 +55,7 @@ public:
         Stop,
         Gear,
         ZoomIn, ZoomOut,
-        Grid, ClipPlane, Measure,
+        Grid, ClipPlane, Measure, Palette,
         View3dIso, View3dLeft, View3dRight, View3dTop, View3dBottom, View3dFront, View3dBack,
         VisibilityMenu, VisibilityShowAll, VisibilityShowSelection, VisibilityHideSelection, VisibilityShowSelectionOnly,
         TurnClockwise, TurnCounterClockwise,
