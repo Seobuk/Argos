@@ -59,9 +59,12 @@ private:
 
     void createMenuViewProjections(QWidget* container);
     void createMenuItemVisibility(QWidget* container);
-    // Argos: right-click context menu to snap the current view to a standard
-    // orientation (정면/후면/좌·우/윗·아랫면/등각).
-    void popupViewOrientationMenu(const QPoint& globalPos);
+    // Argos: right-click context menu — standard-view snaps plus fit-all,
+    // display mode and background-color entries.
+    void popupViewContextMenu(const QPoint& globalPos);
+    // Argos: fit the whole model into the view (shared by the toolbar button and
+    // the right-click context menu).
+    void viewFitAll();
     QRect viewControlsRect() const;
     void layoutViewControls();
     void layoutWidgetPanels();

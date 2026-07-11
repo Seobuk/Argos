@@ -7,8 +7,12 @@
 
 #include "../base/application.h"
 #include "../base/application_item_selection_model.h"
+#include "../base/bnd_utils.h"
 #include "../base/document.h"
+#include "../base/xcaf.h"
 #include "../gui/gui_application.h"
+#include "../graphics/graphics_utils.h"
+#include "../argos_core/measure.h"
 #include "../qtcommon/qtcore_utils.h"
 #include "item_view_buttons.h"
 #include "qtgui_utils.h"
@@ -21,6 +25,7 @@
 #include <QtGui/QMouseEvent>
 #include <QtWidgets/QColorDialog>
 #include <QtWidgets/QMenu>
+#include <QtWidgets/QMessageBox>
 #include <QtWidgets/QTreeWidget>
 #include <QtWidgets/QTreeWidgetItemIterator>
 
@@ -217,6 +222,12 @@ void WidgetModelTree::showContextMenu(const QPoint& pos)
     QMenu menu(this);
     QAction* actChangeColor = menu.addAction(tr("색상 변경..."));
     QAction* actResetColor = menu.addAction(tr("색상 초기화"));
+    menu.addSeparator();
+    QAction* actToggleVisible = menu.addAction(tr("표시/숨김"));
+    QAction* actIsolate = menu.addAction(tr("선택 파트만 표시"));
+    QAction* actFitCamera = menu.addAction(tr("이 파트로 화면 맞춤"));
+    QAction* actSelectInstances = menu.addAction(tr("동일 파트 인스턴스 모두 선택"));
+    QAction* actPartInfo = menu.addAction(tr("파트 정보"));
 
     // Helper: run 'fn(guiDoc, nodeId)' for every targeted node.
     auto fnForEachNode = [&](const std::function<void(GuiDocument*, TreeNodeId)>& fn) {
@@ -244,6 +255,119 @@ void WidgetModelTree::showContextMenu(const QPoint& pos)
         fnForEachNode([&](GuiDocument* guiDoc, TreeNodeId nodeId) {
             guiDoc->resetNodeColor(nodeId);
         });
+    }
+    else if (chosen == actToggleVisible) {
+        // Direction decided from the first node: if it's not fully shown, show all; else hide all.
+        GuiDocument* g0 = m_guiApp->findGuiDocument(nodes.front().document());
+        if (g0) {
+            const bool makeVisible = g0->nodeVisibleState(nodes.front().id()) != CheckState::On;
+            // Redraw every affected document's scene (not just the first) — a
+            // cross-document multi-selection touches more than one GuiDocument.
+            std::vector<GuiDocument*> touched;
+            fnForEachNode([&](GuiDocument* g, TreeNodeId id) {
+                g->setNodeVisible(id, makeVisible);
+                if (std::find(touched.begin(), touched.end(), g) == touched.end())
+                    touched.push_back(g);
+            });
+            for (GuiDocument* g : touched)
+                g->graphicsScene()->redraw();
+        }
+    }
+    else if (chosen == actIsolate) {
+        // Group targets by document; per document hide every root, then re-show the targets.
+        // ponytail: only full hide/show exists (no per-node translucency) — dimming the rest is deferred.
+        std::vector<DocumentPtr> doneDocs;
+        for (const DocumentTreeNode& node : nodes) {
+            const DocumentPtr doc = node.document();
+            if (std::find(doneDocs.begin(), doneDocs.end(), doc) != doneDocs.end())
+                continue;
+
+            doneDocs.push_back(doc);
+            GuiDocument* g = m_guiApp->findGuiDocument(doc);
+            if (!g)
+                continue;
+
+            for (TreeNodeId rootId : doc->modelTree().roots())
+                g->setNodeVisible(rootId, false);
+
+            for (const DocumentTreeNode& target : nodes) {
+                if (target.document() == doc)
+                    g->setNodeVisible(target.id(), true);
+            }
+
+            g->graphicsScene()->redraw();
+        }
+    }
+    else if (chosen == actFitCamera) {
+        GuiDocument* g0 = m_guiApp->findGuiDocument(nodes.front().document());
+        if (g0) {
+            Bnd_Box box;
+            fnForEachNode([&](GuiDocument* g, TreeNodeId id) {
+                g->foreachGraphicsObject(id, [&](GraphicsObjectPtr o) {
+                    BndUtils::add(&box, GraphicsUtils::AisObject_boundingBox(o));
+                });
+            });
+            g0->runViewCameraAnimation([box](OccHandle<V3d_View> view) {
+                GraphicsUtils::V3dView_fitAll(view, box);
+            });
+        }
+    }
+    else if (chosen == actSelectInstances) {
+        // Select every tree node that points at the same product label as the primary node.
+        const DocumentPtr doc = nodes.front().document();
+        const TDF_Label frontLabel = nodes.front().label();
+        const TDF_Label ref = XCaf::isShapeReference(frontLabel)
+                ? XCaf::shapeReferred(frontLabel) : frontLabel;
+        if (!ref.IsNull()) {
+            std::vector<ApplicationItem> hits;
+            const Tree<TDF_Label>& tree = doc->modelTree();
+            traverseTree(tree, [&](TreeNodeId id) {
+                const TDF_Label lbl = tree.nodeData(id);
+                const TDF_Label lblRef = XCaf::isShapeReference(lbl)
+                        ? XCaf::shapeReferred(lbl) : lbl;
+                if (!lblRef.IsNull() && lblRef.IsEqual(ref))
+                    hits.push_back(ApplicationItem(DocumentTreeNode(doc, id)));
+            });
+            m_guiApp->selectionModel()->clear();
+            m_guiApp->selectionModel()->add(hits);
+        }
+    }
+    else if (chosen == actPartInfo) {
+        const TopoDS_Shape shape = XCaf::shape(nodes.front().label());
+        if (shape.IsNull()) {
+            QMessageBox::information(this, tr("파트 정보"), tr("이 파트에는 형상이 없습니다."));
+            return;
+        }
+
+        const argos::MassProperties mp = argos::massProperties(shape);
+
+        // ponytail: single part on the UI thread — fine; move off-thread only if it ever stalls.
+        Bnd_Box box;
+        GuiDocument* g0 = m_guiApp->findGuiDocument(nodes.front().document());
+        if (g0) {
+            g0->foreachGraphicsObject(nodes.front().id(), [&](GraphicsObjectPtr o) {
+                BndUtils::add(&box, GraphicsUtils::AisObject_boundingBox(o));
+            });
+        }
+
+        QString text;
+        if (mp.ok) {
+            text += tr("부피: %1 mm^3\n").arg(mp.volume_mm3, 0, 'f', 2);
+            text += tr("표면적: %1 mm^2\n").arg(mp.area_mm2, 0, 'f', 2);
+        }
+
+        if (!box.IsVoid()) {
+            const BndBoxCoords c = BndBoxCoords::get(box);
+            text += tr("크기: %1 x %2 x %3 mm")
+                        .arg(c.xmax - c.xmin, 0, 'f', 2)
+                        .arg(c.ymax - c.ymin, 0, 'f', 2)
+                        .arg(c.zmax - c.zmin, 0, 'f', 2);
+        }
+
+        if (text.isEmpty())
+            text = tr("측정 가능한 정보가 없습니다.");
+
+        QMessageBox::information(this, tr("파트 정보"), text);
     }
 }
 

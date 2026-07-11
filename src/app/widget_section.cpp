@@ -25,6 +25,7 @@
 #include <TopoDS_Compound.hxx>
 #include <TopoDS_Shape.hxx>
 #include <gp.hxx>
+#include <gp_Ax1.hxx>
 #include <gp_Dir.hxx>
 #include <gp_Pln.hxx>
 #include <gp_Trsf.hxx>
@@ -130,6 +131,20 @@ WidgetSection::WidgetSection(GuiDocument* guiDoc, QWidget* parent)
     planeRow->addStretch(1);
     root->addLayout(planeRow);
 
+    // 기울기
+    root->addWidget(caption(tr("기울기")));
+    auto tiltRow = new QHBoxLayout;
+    tiltRow->setSpacing(6);
+    m_spinAngle = new QDoubleSpinBox(this);
+    m_spinAngle->setDecimals(1);
+    m_spinAngle->setRange(-180.0, 180.0);
+    m_spinAngle->setSingleStep(1.0);
+    m_spinAngle->setSuffix(" °");
+    m_spinAngle->setValue(0.0);
+    tiltRow->addWidget(m_spinAngle);
+    tiltRow->addStretch(1);
+    root->addLayout(tiltRow);
+
     // 옵셋
     root->addWidget(caption(tr("옵셋")));
     auto offRow = new QHBoxLayout;
@@ -215,6 +230,8 @@ WidgetSection::WidgetSection(GuiDocument* guiDoc, QWidget* parent)
     });
     QObject::connect(m_spin, &QDoubleSpinBox::editingFinished, this, [this]{ this->settleRecompute(); });
 
+    QObject::connect(m_spinAngle, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this]{ this->setPlane(m_curPlane, true); });
+
     QObject::connect(btnFlip, &QPushButton::clicked, this, [this]{ this->applyFlip(); });
     QObject::connect(m_checkCapping, &QCheckBox::toggled, this, [this](bool on) { this->applyCapping(on); });
     QObject::connect(m_checkOutline, &QCheckBox::toggled, this, [this](bool on) {
@@ -288,6 +305,26 @@ gp_Dir WidgetSection::baseNormal() const
     }
 }
 
+gp_Dir WidgetSection::tiltedNormal() const
+{
+    const gp_Dir base = this->baseNormal();
+    const double a = m_spinAngle ? m_spinAngle->value() : 0.0;
+    if (a == 0.0)
+        return base;
+
+    // Rotation axis perpendicular to the base normal (cyclic so it never
+    // coincides with it): XY->DX, YZ->DY, ZX->DZ.
+    gp_Dir axis;
+    switch (m_curPlane) {
+    case Plane::YZ: axis = gp::DY(); break;
+    case Plane::ZX: axis = gp::DZ(); break;
+    case Plane::XY:
+    default:        axis = gp::DX(); break;
+    }
+    const double d2r = std::acos(-1.0) / 180.0;
+    return base.Rotated(gp_Ax1(gp::Origin(), axis), a * d2r);
+}
+
 double WidgetSection::posFromSlider(int v) const
 {
     return MathUtils::mappedValue(double(v), 0.0, 1000.0, m_spin->minimum(), m_spin->maximum());
@@ -302,7 +339,7 @@ int WidgetSection::sliderFromPos(double pos) const
 void WidgetSection::setPlane(Plane p, bool keepOffset)
 {
     m_curPlane = p;
-    const gp_Dir base = this->baseNormal();
+    const gp_Dir base = this->tiltedNormal();
 
     double rmin = -50.0, rmax = 50.0;
     if (!m_bndBox.IsVoid()) {
@@ -358,7 +395,7 @@ void WidgetSection::applyOffset(double pos)
 void WidgetSection::applyFlip()
 {
     m_flipped = !m_flipped;
-    const gp_Dir n = m_flipped ? this->baseNormal().Reversed() : this->baseNormal();
+    const gp_Dir n = m_flipped ? this->tiltedNormal().Reversed() : this->tiltedNormal();
     GraphicsUtils::Gfx3dClipPlane_setNormal(m_plane, n);
     GraphicsUtils::Gfx3dClipPlane_setPosition(m_plane, m_spin->value());
     // A flip only swaps which side is kept -- the plane itself does not move, so

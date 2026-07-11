@@ -50,6 +50,7 @@ private:
     enum class Plane { XY, YZ, ZX };
 
     gp_Dir baseNormal() const;
+    gp_Dir tiltedNormal() const;
     double posFromSlider(int v) const;
     int sliderFromPos(double pos) const;
 
@@ -118,6 +119,7 @@ private:
     QPushButton* m_btnZX = nullptr;
     QSlider* m_slider = nullptr;
     QDoubleSpinBox* m_spin = nullptr;
+    QDoubleSpinBox* m_spinAngle = nullptr;
     QCheckBox* m_checkCapping = nullptr;
     QCheckBox* m_checkOutline = nullptr;
     QLabel* m_labelPerimeter = nullptr;

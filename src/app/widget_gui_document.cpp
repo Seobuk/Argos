@@ -5,6 +5,7 @@
 
 #include "widget_gui_document.h"
 
+#include "../graphics/graphics_object_driver.h"
 #include "../graphics/graphics_utils.h"
 #include "../gui/gui_application.h"
 #include "../gui/gui_document.h"
@@ -19,16 +20,21 @@
 #include "widget_occ_view.h"
 #include "widget_occ_view_controller.h"
 #include "qtwidgets_utils.h"
+#include "qtgui_utils.h"
+#include "../qtcommon/qstring_conv.h"
 
 #include <QtGui/QCursor>
 #include <QtGui/QPainter>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QShortcut>
+#include <QActionGroup> // WARNING Qt5 <QtWidgets/...> / Qt6 <QtGui/...>
 #include <QtWidgets/QBoxLayout>
+#include <QtWidgets/QColorDialog>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QMenu>
 #include <QtWidgets/QProxyStyle>
 #include <QtWidgets/QWidgetAction>
+#include <V3d_View.hxx>
 #include <Standard_Version.hxx>
 
 namespace Mayo {
@@ -150,12 +156,7 @@ WidgetGuiDocument::WidgetGuiDocument(GuiDocument* guiDoc, QWidget* parent)
         if (view == m_qtOccView->v3dView())
             m_qtOccView->redraw();
     });
-    QObject::connect(m_btnFitAll, &ButtonFlat::clicked, this, [=]{
-        m_guiDoc->runViewCameraAnimation([=](OccHandle<V3d_View> view) {
-            auto bndBoxFlags = GuiDocument::OnlySelectedGraphics | GuiDocument::OnlyVisibleGraphics;
-            GraphicsUtils::V3dView_fitAll(view, this->guiDocument()->graphicsBoundingBox(bndBoxFlags));
-        });
-    });
+    QObject::connect(m_btnFitAll, &ButtonFlat::clicked, this, [this]{ this->viewFitAll(); });
     QObject::connect(m_btnGrid, &ButtonFlat::checked, this, &WidgetGuiDocument::toggleWidgetGrid);
     QObject::connect(m_btnExplode, &ButtonFlat::checked, this, &WidgetGuiDocument::toggleWidgetExplode);
     QObject::connect(m_btnMeasure, &ButtonFlat::checked, this, &WidgetGuiDocument::toggleWidgetMeasure);
@@ -187,7 +188,7 @@ WidgetGuiDocument::WidgetGuiDocument(GuiDocument* guiDoc, QWidget* parent)
         // Argos: right-click (without dragging) pops up the standard-view menu so
         // the user can snap the current view to 정면/윗면/… .
         else if (btn == Aspect_VKeyMouse_RightButton) {
-            this->popupViewOrientationMenu(QCursor::pos());
+            this->popupViewContextMenu(QCursor::pos());
         }
     });
     m_controller->signalMultiSelectionToggled.connectSlot([=](bool on) {
@@ -457,7 +458,15 @@ void WidgetGuiDocument::createMenuViewProjections(QWidget* container)
     });
 }
 
-void WidgetGuiDocument::popupViewOrientationMenu(const QPoint& globalPos)
+void WidgetGuiDocument::viewFitAll()
+{
+    m_guiDoc->runViewCameraAnimation([=](OccHandle<V3d_View> view) {
+        auto bndBoxFlags = GuiDocument::OnlySelectedGraphics | GuiDocument::OnlyVisibleGraphics;
+        GraphicsUtils::V3dView_fitAll(view, this->guiDocument()->graphicsBoundingBox(bndBoxFlags));
+    });
+}
+
+void WidgetGuiDocument::popupViewContextMenu(const QPoint& globalPos)
 {
     struct OrientationData {
         V3d_TypeOfOrientation proj;
@@ -484,6 +493,59 @@ void WidgetGuiDocument::popupViewOrientationMenu(const QPoint& globalPos)
         const V3d_TypeOfOrientation proj = it.proj;
         QObject::connect(action, &QAction::triggered, this, [=]{
             m_guiDoc->setViewCameraOrientation(proj, GuiDocument::ViewOrientationFlag_FitAll);
+        });
+    }
+
+    // Argos: fit-all
+    menu->addSeparator();
+    auto actionFitAll = menu->addAction(mayoTheme()->icon(Theme::Icon::Expand), tr("화면 맞춤"));
+    QObject::connect(actionFitAll, &QAction::triggered, this, [this]{ this->viewFitAll(); });
+
+    // Argos: display-mode submenu (음영/와이어프레임/HLR)
+    const auto spanDrivers = m_guiDoc->guiApplication()->graphicsObjectDrivers();
+    QMenu* menuDisplayMode = nullptr;
+    for (const GraphicsObjectDriverPtr& driver : spanDrivers) {
+        if (driver->displayModes().empty())
+            continue;
+
+        if (!menuDisplayMode)
+            menuDisplayMode = menu->addMenu(tr("표시 모드"));
+
+        auto group = new QActionGroup(menuDisplayMode);
+        group->setExclusive(true);
+        for (const Enumeration::Item& displayMode : driver->displayModes().items()) {
+            auto action = new QAction(to_QString(displayMode.name.tr()), menuDisplayMode);
+            action->setCheckable(true);
+            action->setData(displayMode.value);
+            menuDisplayMode->addAction(action);
+            group->addAction(action);
+            if (displayMode.value == m_guiDoc->activeDisplayMode(driver))
+                action->setChecked(true);
+        }
+
+        QObject::connect(group, &QActionGroup::triggered, this, [=](const QAction* action) {
+            m_guiDoc->setActiveDisplayMode(driver, action->data().toInt());
+            m_qtOccView->redraw();
+        });
+    }
+
+    // Argos: background color
+    auto actionBkgnd = menu->addAction(tr("배경색..."));
+    QObject::connect(actionBkgnd, &QAction::triggered, this, [this]{
+        auto dlg = new QColorDialog(this);
+        QObject::connect(dlg, &QColorDialog::colorSelected, this, [this](const QColor& c) {
+            m_guiDoc->v3dView()->SetBackgroundColor(QtGuiUtils::toPreferredColorSpace(c));
+            m_qtOccView->redraw();
+        });
+        QtWidgetsUtils::asyncDialogExec(dlg);
+    });
+
+    // Argos: quick toggle to leave section mode when it's active
+    if (m_btnSection && m_btnSection->isChecked()) {
+        menu->addSeparator();
+        auto actionSectionOff = menu->addAction(tr("Section 끄기"));
+        QObject::connect(actionSectionOff, &QAction::triggered, this, [this]{
+            m_btnSection->setChecked(false);
         });
     }
 

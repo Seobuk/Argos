@@ -132,6 +132,8 @@ DialogOptions::DialogOptions(Settings* settings, QWidget* parent)
 {
     m_ui->setupUi(this);
     m_ui->listWidget_Settings->setStyle(CustomStyle::instance());
+    m_ui->treeView_GroupSections->setMinimumWidth(240);
+    this->setMinimumWidth(900);
 
     auto treeModel = createGroupSectionModel(settings, this);
     m_ui->treeView_GroupSections->setModel(treeModel);
@@ -302,7 +304,7 @@ QWidget* DialogOptions::createEditor(Property* property, QWidget* parentWidget) 
         panelEditorLayout->setContentsMargins(0, 0, 0, 10);
         if (!property->description().empty()) {
             auto labelDescription = new QLabel(to_QString(property->description()), panelEditor);
-            labelDescription->setMinimumWidth(600);
+            labelDescription->setMinimumWidth(300);
             labelDescription->setWordWrap(true);
 #if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
             labelDescription->setTextFormat(Qt::MarkdownText);
