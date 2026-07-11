@@ -33,6 +33,7 @@
 #include "qtopengl_utils.h"
 #include "splash_screen.h"
 #include "theme.h"
+#include "update_checker.h"
 #include "widget_model_tree.h"
 #include "widget_model_tree_builder_mesh.h"
 #include "widget_model_tree_builder_xde.h"
@@ -443,6 +444,9 @@ static int runApp(QCoreApplication* qtApp)
     // Close the startup splash once the event loop takes over(main window shown)
     if (splash)
         QTimer::singleShot(0, qtApp, []{ SplashScreen::closeScreen(); });
+
+    // Argos: one-shot silent update check, deferred so it never blocks startup
+    QTimer::singleShot(4000, &mainWindow, [&]{ checkForUpdates(&mainWindow, true); });
 
     appModule->settings()->resetAll();
     fnLoadAppSettings(appModule->settings());

@@ -26,6 +26,14 @@ public:
     static constexpr std::string_view Name = "system-info";
 };
 
+class CommandCheckForUpdate : public Command {
+public:
+    explicit CommandCheckForUpdate(IAppContext* context);
+    void execute() override;
+
+    static constexpr std::string_view Name = "check-for-update";
+};
+
 class CommandAbout : public Command {
 public:
     explicit CommandAbout(IAppContext* context);

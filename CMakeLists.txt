@@ -6,7 +6,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 set(Mayo_VersionMajor 1)
-set(Mayo_VersionMinor 0)
+set(Mayo_VersionMinor 1)
 set(Mayo_VersionPatch 0)
 set(Mayo_Version ${Mayo_VersionMajor}.${Mayo_VersionMinor}.${Mayo_VersionPatch})
 
@@ -114,7 +114,7 @@ if(QT_FOUND)
     endif()
 
     if(Mayo_BuildApp)
-        find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Gui Widgets Test)
+        find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Gui Widgets Test Network)
         if(WIN32 AND QT_VERSION_MAJOR EQUAL 5)
             find_package(Qt5 REQUIRED COMPONENTS WinExtras)
         elseif(QT_VERSION_MAJOR EQUAL 6)
@@ -592,6 +592,7 @@ list(
     Qt${QT_VERSION_MAJOR}::Core
     Qt${QT_VERSION_MAJOR}::Gui
     Qt${QT_VERSION_MAJOR}::Widgets
+    Qt${QT_VERSION_MAJOR}::Network
 )
 
 if(WIN32 AND QT_VERSION_MAJOR EQUAL 5)

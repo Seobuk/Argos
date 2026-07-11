@@ -159,6 +159,7 @@ void MainWindow::createCommands()
     // "Help" commands
     this->addCommand<CommandReportBug>();
     this->addCommand<CommandSystemInformation>();
+    this->addCommand<CommandCheckForUpdate>();
     this->addCommand<CommandAbout>();
 }
 
@@ -222,6 +223,7 @@ void MainWindow::createMenus()
         auto menu = m_ui->menu_Help;
         fnAddAction(menu, CommandReportBug::Name);
         fnAddAction(menu, CommandSystemInformation::Name);
+        fnAddAction(menu, CommandCheckForUpdate::Name);
         menu->addSeparator();
         fnAddAction(menu, CommandAbout::Name);
     }

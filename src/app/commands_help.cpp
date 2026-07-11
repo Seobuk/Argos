@@ -9,6 +9,7 @@
 #include "dialog_about.h"
 #include "library_info.h"
 #include "qtwidgets_utils.h"
+#include "update_checker.h"
 
 #include <QtCore/QDir>
 #include <QtCore/QUrl>
@@ -27,6 +28,18 @@ CommandReportBug::CommandReportBug(IAppContext* context)
 void CommandReportBug::execute()
 {
     QDesktopServices::openUrl(QUrl(QStringLiteral("https://github.com/fougue/mayo/issues")));
+}
+
+CommandCheckForUpdate::CommandCheckForUpdate(IAppContext* context)
+    : Command(context)
+{
+    auto action = this->createAction();
+    action->setText(Command::tr("업데이트 확인"));
+}
+
+void CommandCheckForUpdate::execute()
+{
+    Mayo::checkForUpdates(this->widgetMain(), false);
 }
 
 CommandAbout::CommandAbout(IAppContext* context)

@@ -191,11 +191,25 @@ jobs:
               $size = [math]::Round((Get-Item "dist/Argos-win64.zip").Length / 1MB, 1)
               Write-Host "Packaged dist/Argos-win64.zip ($size MB)"
 
+        - name: Build installer (Inno Setup)
+          shell: pwsh
+          run: |
+              choco install innosetup --no-progress -y
+              $ver = '${{ steps.reltag.outputs.release_tag }}' -replace '^v',''
+              if (-not $ver) { $ver = '0.0.0' }
+              & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" `
+                  /DAppVersion=$ver `
+                  /DDistDir="${{ github.workspace }}\dist\Argos" `
+                  /DOutDir="${{ github.workspace }}\dist" `
+                  installer\argos.iss
+
         - name: Upload build artifact
           uses: actions/upload-artifact@v4
           with:
               name: Argos-win64
-              path: dist/Argos-win64.zip
+              path: |
+                  dist/Argos-win64.zip
+                  dist/Argos-Setup-*.exe
 
         - name: Publish Release
           if: steps.reltag.outputs.release_tag != ''
@@ -206,6 +220,8 @@ jobs:
               # If the tag doesn't exist yet it is created at this commit.
               tag_name: ${{ steps.reltag.outputs.release_tag }}
               name: Argos ${{ steps.reltag.outputs.release_tag }}
-              files: dist/Argos-win64.zip
+              files: |
+                  dist/Argos-win64.zip
+                  dist/Argos-Setup-*.exe
               generate_release_notes: true
               fail_on_unmatched_files: true
