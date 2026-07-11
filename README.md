@@ -51,8 +51,6 @@ argos_core (Qt 없음, OpenCASCADE only)
 최신 빌드는 **[Releases](https://github.com/Seobuk/Argos/releases/latest)** 에서 받을 수 있습니다.
 `Argos-win64.zip` 의 압축을 풀고 **`Argos.exe`** 를 실행하세요. (Windows 10/11 64비트)
 
-> 비공개 저장소이므로 다운로드에는 저장소 접근 권한이 필요합니다.
-
 ## 🖥 명령줄 도구 (`argos-cli`)
 
 헤드리스로 측정·단면을 수행하고 결과를 **JSON으로 표준출력**합니다.

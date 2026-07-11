@@ -51,8 +51,6 @@ argos_core (no Qt, OpenCASCADE only)
 Grab the latest build from **[Releases](https://github.com/Seobuk/Argos/releases/latest)**.
 Unzip `Argos-win64.zip` and run **`Argos.exe`** (Windows 10/11, 64-bit).
 
-> This is a private repository, so downloading requires repo access.
-
 ## 🖥 Command line (`argos-cli`)
 
 Headless measure / section with **JSON on stdout**.
