@@ -7,7 +7,7 @@ cmake_minimum_required(VERSION 3.16)
 
 set(Mayo_VersionMajor 1)
 set(Mayo_VersionMinor 1)
-set(Mayo_VersionPatch 2)
+set(Mayo_VersionPatch 3)
 set(Mayo_Version ${Mayo_VersionMajor}.${Mayo_VersionMinor}.${Mayo_VersionPatch})
 
 project(
