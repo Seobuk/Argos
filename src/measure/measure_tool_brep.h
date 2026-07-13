@@ -7,6 +7,8 @@
 
 #include "measure_tool.h"
 
+#include <Bnd_Box.hxx>
+
 class TopoDS_Edge;
 class TopoDS_Shape;
 
@@ -36,6 +38,13 @@ public:
     static MeasureLength brepLength(const TopoDS_Shape& shape);
     static MeasureArea brepArea(const TopoDS_Shape& shape);
     static MeasureBoundingBox brepBoundingBox(const TopoDS_Shape& shape);
+
+    // Axis-aligned bounding box of 'shape' considering only real part geometry.
+    // Faces are used when the shape has any (exact size of every solid/sheet
+    // body); a shape with no faces falls back to its edges, then its vertices.
+    // Free datum/reference geometry (construction points and axes) is therefore
+    // ignored, so the box is never dragged out to the world origin.
+    static Bnd_Box brepPartBndBox(const TopoDS_Shape& shape);
 
 private:
     static MeasureCircle brepCircleFromGeometricEdge(const TopoDS_Edge& edge);

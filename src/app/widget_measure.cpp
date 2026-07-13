@@ -8,6 +8,7 @@
 #include "theme.h"
 #include "ui_widget_measure.h"
 
+#include "../base/bnd_utils.h"
 #include "../base/cpp_utils.h"
 #include "../base/document.h"
 #include "../base/occ_handle.h"
@@ -975,8 +976,12 @@ void WidgetMeasure::measureOverallSize()
     QThreadPool::globalInstance()->start([self, shapes, origLabel]{
         Bnd_Box box;
         try {
+            // Only real part geometry counts toward the overall size. brepPartBndBox()
+            // measures faces (falling back to edges/vertices) so free datum points and
+            // axes sitting at the origin don't stretch the box from the model all the
+            // way out to (0,0,0). BndUtils::add() skips any void per-shape box.
             for (const TopoDS_Shape& shape : shapes)
-                BRepBndLib::AddOptimal(shape, box, false /*useTriangulation*/, false /*useShapeTolerance*/);
+                BndUtils::add(&box, MeasureToolBRep::brepPartBndBox(shape));
         }
         catch (...) {
             // leave the box void; the UI-thread continuation falls back to the graphics box

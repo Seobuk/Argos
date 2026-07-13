@@ -30,6 +30,7 @@
 #include <Precision.hxx>
 #include <ProjLib.hxx>
 #include <StdSelect_BRepOwner.hxx>
+#include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Shape.hxx>
 #include <gp_Elips.hxx>
@@ -717,6 +718,39 @@ MeasureArea MeasureToolBRep::brepArea(const TopoDS_Shape& shape)
     return areaResult;
 }
 
+Bnd_Box MeasureToolBRep::brepPartBndBox(const TopoDS_Shape& shape)
+{
+    Bnd_Box box;
+    if (shape.IsNull())
+        return box;
+
+    // Accumulate the optimal box of every sub-shape of the given type. Exact
+    // geometric size is requested (useTriangulation=false) so a Ø88 part reads
+    // 88.00 rather than a deflection-padded 88.43.
+    auto fnAddSubShapes = [&](TopAbs_ShapeEnum shapeType) {
+        bool added = false;
+        for (TopExp_Explorer it(shape, shapeType); it.More(); it.Next()) {
+            BRepBndLib::AddOptimal(it.Current(), box, false /*useTriangulation*/, false /*useShapeTolerance*/);
+            added = true;
+        }
+
+        return added;
+    };
+
+    // Prefer faces: they capture the full extent of every solid and sheet body
+    // while skipping free datum points/axes (reference geometry) that would
+    // otherwise pull the box out to the world origin. Wireframe-only shapes have
+    // no faces, so fall back to edges, then to vertices.
+    if (fnAddSubShapes(TopAbs_FACE))
+        return box;
+
+    if (fnAddSubShapes(TopAbs_EDGE))
+        return box;
+
+    fnAddSubShapes(TopAbs_VERTEX);
+    return box;
+}
+
 MeasureBoundingBox MeasureToolBRep::brepBoundingBox(const TopoDS_Shape& shape)
 {
     MeasureBoundingBox measure;
@@ -731,8 +765,7 @@ MeasureBoundingBox MeasureToolBRep::brepBoundingBox(const TopoDS_Shape& shape)
     measure.cornerMax = points[7];
     //measure.isAxisAligned = bnd.IsAABox();
 #else
-    Bnd_Box bnd;
-    BRepBndLib::AddOptimal(shape, bnd);
+    const Bnd_Box bnd = brepPartBndBox(shape);
     throwErrorIf<ErrorCode::BoundingBoxIsVoid>(bnd.IsVoid());
     measure.cornerMin = bnd.CornerMin();
     measure.cornerMax = bnd.CornerMax();

@@ -36,6 +36,7 @@ private slots:
 
     void BRepBoundingBox_Sphere_test();
     void BRepBoundingBox_NullShape_test();
+    void BRepBoundingBox_IgnoresDatumAtOrigin_test();
 };
 
 } // namespace Mayo

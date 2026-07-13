@@ -26,6 +26,7 @@
 #include <GeomConvert_ApproxCurve.hxx>
 #include <GC_MakeCircle.hxx>
 #include <GC_MakeEllipse.hxx>
+#include <TopoDS_Compound.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Vertex.hxx>
 
@@ -222,6 +223,31 @@ void TestMeasure::BRepBoundingBox_NullShape_test()
 {
     const TopoDS_Shape nullShape;
     MAYO_QVERIFY_THROWS_EXCEPTION(IMeasureError, MeasureToolBRep::brepBoundingBox(nullShape));
+}
+
+void TestMeasure::BRepBoundingBox_IgnoresDatumAtOrigin_test()
+{
+    // A part sitting away from the origin, bundled with a free datum vertex at the
+    // world origin (0,0,0) — the sort of reference geometry a CAD export drops in.
+    // The bounding box must hug the part only; the datum must not stretch it back
+    // to the origin.
+    const gp_Pnt boxMin{ 100., 100., 100. };
+    const gp_Pnt boxMax{ 150., 150., 150. };
+    const TopoDS_Shape solidBox = BRepPrimAPI_MakeBox(boxMin, boxMax);
+    const TopoDS_Shape datumVertex = BRepBuilderAPI_MakeVertex(gp_Pnt{ 0., 0., 0. });
+
+    TopoDS_Compound compound;
+    BRep_Builder builder;
+    builder.MakeCompound(compound);
+    builder.Add(compound, solidBox);
+    builder.Add(compound, datumVertex);
+
+    const MeasureBoundingBox bndBox = MeasureToolBRep::brepBoundingBox(compound);
+    QVERIFY(GeomUtils::equal(bndBox.cornerMin, boxMin));
+    QVERIFY(GeomUtils::equal(bndBox.cornerMax, boxMax));
+    QCOMPARE(double(UnitSystem::millimeters(bndBox.xLength)), 50.);
+    QCOMPARE(double(UnitSystem::millimeters(bndBox.yLength)), 50.);
+    QCOMPARE(double(UnitSystem::millimeters(bndBox.zLength)), 50.);
 }
 
 } // namespace Mayo
