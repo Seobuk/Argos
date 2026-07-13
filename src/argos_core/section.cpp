@@ -7,16 +7,29 @@
 
 #include <BRepAlgoAPI_Section.hxx>
 #include <BRepBndLib.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepClass_FaceClassifier.hxx>
 #include <BRepGProp.hxx>
+#include <BRep_Builder.hxx>
 #include <Bnd_Box.hxx>
 #include <GProp_GProps.hxx>
+#include <Precision.hxx>
+#include <ShapeAnalysis_FreeBounds.hxx>
 #include <Standard_Failure.hxx>
 #include <TopExp.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopTools_HSequenceOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
+#include <TopoDS.hxx>
+#include <TopoDS_Compound.hxx>
+#include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
+#include <TopoDS_Wire.hxx>
 #include <gp_Dir.hxx>
 #include <gp_Pln.hxx>
 #include <gp_Pnt.hxx>
+
+#include <vector>
 
 #include "../3rdparty/nlohmann/json.hpp"
 
@@ -224,6 +237,96 @@ SectionResult computeSection(const TopoDS_Shape& shape, const SectionState& s)
     const Vec3 n = planeNormal(s);
     const Vec3 p = planePoint(s);
     return computeSection(shape, gp_Pln(gp_Pnt(p.x, p.y, p.z), gp_Dir(n.x, n.y, n.z)));
+}
+
+TopoDS_Shape buildSectionFaces(const TopoDS_Shape& sectionEdges, const gp_Pln& plane)
+{
+    if (sectionEdges.IsNull())
+        return {};
+
+    try {
+        // 1) Stitch the loose section edges into wires. shared=True connects on
+        //    the shared TopoDS_Vertex -- exact for a single BRepAlgoAPI_Section
+        //    result, where loop junctions share vertices.
+        Handle(TopTools_HSequenceOfShape) edgeSeq = new TopTools_HSequenceOfShape;
+        for (TopExp_Explorer ex(sectionEdges, TopAbs_EDGE); ex.More(); ex.Next())
+            edgeSeq->Append(ex.Current());
+        if (edgeSeq->IsEmpty())
+            return {};
+
+        Handle(TopTools_HSequenceOfShape) wireSeq;
+        ShapeAnalysis_FreeBounds::ConnectEdgesToWires(
+            edgeSeq, Precision::Confusion(), Standard_True, wireSeq);
+        if (wireSeq.IsNull() || wireSeq->IsEmpty())
+            return {};
+
+        // 2) One provisional planar face per closed loop, with its area and an
+        //    interior (centroid) point for containment tests.
+        struct Loop { TopoDS_Wire wire; TopoDS_Face face; gp_Pnt inside; double area = 0; int depth = 0; };
+        std::vector<Loop> loops;
+        for (int i = 1; i <= wireSeq->Length(); ++i) {
+            const TopoDS_Wire w = TopoDS::Wire(wireSeq->Value(i));
+            BRepBuilderAPI_MakeFace mf(plane, w, Standard_True /*onlyPlane*/);
+            if (!mf.IsDone())
+                continue;   // open/degenerate loop -> can't bound a face
+            const TopoDS_Face f = mf.Face();
+            GProp_GProps g;
+            BRepGProp::SurfaceProperties(f, g);
+            const double a = g.Mass();
+            if (a < 1.0e-9)
+                continue;
+            loops.push_back({ w, f, g.CentreOfMass(), a, 0 });
+        }
+        if (loops.empty())
+            return {};
+
+        // 3) Nesting depth = how many larger loops contain this loop's interior
+        //    point. Even depth = solid region (outer), odd = hole.
+        for (std::size_t i = 0; i < loops.size(); ++i) {
+            for (std::size_t j = 0; j < loops.size(); ++j) {
+                if (i == j || loops[j].area <= loops[i].area)
+                    continue;
+                BRepClass_FaceClassifier cls(loops[j].face, loops[i].inside, Precision::Confusion());
+                if (cls.State() == TopAbs_IN)
+                    ++loops[i].depth;
+            }
+        }
+
+        // 4) Build outer faces (even depth) and subtract their immediate holes
+        //    (depth+1 loops contained in them). ponytail: one-parent nesting is
+        //    resolved exactly; an island inside a hole (depth+2) becomes its own
+        //    outer face -- rare in a cross-section and still correct in area.
+        BRep_Builder builder;
+        TopoDS_Compound comp;
+        builder.MakeCompound(comp);
+        int nFaces = 0;
+        for (std::size_t i = 0; i < loops.size(); ++i) {
+            if (loops[i].depth % 2 != 0)
+                continue;   // hole: emitted as a hole of its parent
+            BRepBuilderAPI_MakeFace mf(plane, loops[i].wire, Standard_True);
+            if (!mf.IsDone())
+                continue;
+            for (std::size_t j = 0; j < loops.size(); ++j) {
+                if (loops[j].depth != loops[i].depth + 1 || loops[j].area >= loops[i].area)
+                    continue;
+                BRepClass_FaceClassifier cls(loops[i].face, loops[j].inside, Precision::Confusion());
+                if (cls.State() == TopAbs_IN) {
+                    TopoDS_Wire hole = loops[j].wire;
+                    hole.Reverse();
+                    mf.Add(hole);
+                }
+            }
+            if (mf.IsDone()) {
+                builder.Add(comp, mf.Face());
+                ++nFaces;
+            }
+        }
+
+        return nFaces > 0 ? TopoDS_Shape(comp) : TopoDS_Shape();
+    }
+    catch (const Standard_Failure&) {
+        return {};
+    }
 }
 
 std::string to_json(const SectionResult& r, int indent)

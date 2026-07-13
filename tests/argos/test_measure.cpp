@@ -12,6 +12,7 @@
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepAlgoAPI_Cut.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
@@ -335,6 +336,42 @@ int main()
             secJsonOk = j.contains("plane") && j.contains("coefficients") && j.contains("normal");
         } catch (...) { secJsonOk = false; }
         check(secJsonOk, "SectionState to_json valid with plane/normal/coefficients");
+    }
+
+    // --- buildSectionFaces: fill the cut outline into a measurable face ----
+    {
+        // Solid box cut at z=5 -> one 10x20 rectangular cross-section face.
+        const gp_Pln plnZ5(gp_Pnt(0, 0, 5), gp_Dir(0, 0, 1));
+        const SectionResult srf = computeSection(box, plnZ5);
+        const TopoDS_Shape faces = buildSectionFaces(srf.shape, plnZ5);
+        check(!faces.IsNull(), "buildSectionFaces returns a face for a solid cut");
+        TopTools_IndexedMapOfShape fmap;
+        TopExp::MapShapes(faces, TopAbs_FACE, fmap);
+        check(fmap.Extent() == 1, "box cut -> exactly one cross-section face",
+              "got=" + std::to_string(fmap.Extent()));
+        if (fmap.Extent() >= 1) {
+            const MeasureResult ar = dispatch({ fmap(1) });
+            check(ar.ok && ar.kind == MeasureKind::Area, "cut face -> Area", ar.error);
+            checkNear(ar.value.value_or(0), 200.0, 1e-6, "box cut face area == 200 (10x20)");
+        }
+
+        // Tube (outer R=10 minus inner R=5, h=20) cut at z=10 -> annulus; the
+        // hole must be subtracted so the face area is pi*(100-25) = 75*pi.
+        const TopoDS_Shape outer = BRepPrimAPI_MakeCylinder(10.0, 20.0).Shape();
+        const TopoDS_Shape inner = BRepPrimAPI_MakeCylinder(5.0, 20.0).Shape();
+        const TopoDS_Shape tube = BRepAlgoAPI_Cut(outer, inner).Shape();
+        const gp_Pln plnZ10(gp_Pnt(0, 0, 10), gp_Dir(0, 0, 1));
+        const SectionResult srt = computeSection(tube, plnZ10);
+        const TopoDS_Shape tfaces = buildSectionFaces(srt.shape, plnZ10);
+        TopTools_IndexedMapOfShape tfmap;
+        TopExp::MapShapes(tfaces, TopAbs_FACE, tfmap);
+        check(tfmap.Extent() == 1, "tube cut -> single annulus face (hole resolved)",
+              "got=" + std::to_string(tfmap.Extent()));
+        if (tfmap.Extent() >= 1) {
+            const MeasureResult ar = dispatch({ tfmap(1) });
+            checkNear(ar.value.value_or(0), 75.0 * std::acos(-1.0), 1e-2,
+                      "annulus cut area == 75*pi (hole subtracted)");
+        }
     }
 
     // --- empty selection -> error ----------------------------------------

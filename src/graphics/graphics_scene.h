@@ -55,6 +55,9 @@ public:
     void activateObjectSelection(const GraphicsObjectPtr& object, int mode);
     void deactivateObjectSelection(const GraphicsObjectPtr& object, int mode);
     void deactivateObjectSelection(const GraphicsObjectPtr& object);
+    // Pixel pick-tolerance for an object's selection mode (default ~2). Larger
+    // makes thin sensitives (e.g. section-cut lines) easy to grab.
+    void setObjectSelectionSensitivity(const GraphicsObjectPtr& object, int mode, int sensitivity);
 
     void addSelectionFilter(const OccHandle<SelectMgr_Filter>& filter);
     void removeSelectionFilter(const OccHandle<SelectMgr_Filter>& filter);

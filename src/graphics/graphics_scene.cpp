@@ -213,6 +213,12 @@ void GraphicsScene::deactivateObjectSelection(const GraphicsObjectPtr &object)
     d->m_aisContext->Deactivate(object);
 }
 
+void GraphicsScene::setObjectSelectionSensitivity(const GraphicsObjectPtr& object, int mode, int sensitivity)
+{
+    if (object)
+        d->m_aisContext->SetSelectionSensitivity(object, mode, sensitivity);
+}
+
 void GraphicsScene::addSelectionFilter(const OccHandle<SelectMgr_Filter>& filter)
 {
     d->m_aisContext->AddFilter(filter);

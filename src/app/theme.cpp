@@ -363,9 +363,11 @@ public:
         case Theme::Color::Graphic3d_AspectFillArea:
             return appPalette.color(QPalette::Highlight);
         case Theme::Color::View3d_BackgroundGradientStart:
-            return QColor{100, 100, 100};
+            // Cool "studio" gradient instead of a flat dead grey -- more depth,
+            // less drab, while staying dark-theme-appropriate.
+            return QColor{74, 84, 100};
         case Theme::Color::View3d_BackgroundGradientEnd:
-            return QColor{200, 200, 200};
+            return QColor{190, 200, 214};
         case Theme::Color::RubberBandView3d_Line:
             return appPalette.color(QPalette::Highlight);
         case Theme::Color::RubberBandView3d_Fill:

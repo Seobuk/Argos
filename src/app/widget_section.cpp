@@ -15,6 +15,7 @@
 #include "../argos_core/section.h"
 
 #include <AIS_ConnectedInteractive.hxx>
+#include <AIS_InteractiveContext.hxx>
 #include <AIS_Shape.hxx>
 #include <BRep_Builder.hxx>
 #include <Graphic3d_SequenceOfHClipPlane.hxx>
@@ -292,8 +293,12 @@ WidgetSection::~WidgetSection()
     m_connGuiDocErased.disconnect();
     m_connNodesVisibility.disconnect();
     // m_guiDoc is null when the document was erased first (document close).
-    if (m_guiDoc && !m_outline.IsNull())
-        m_guiDoc->graphicsScene()->eraseObject(m_outline);
+    if (m_guiDoc) {
+        if (!m_outline.IsNull())
+            m_guiDoc->graphicsScene()->eraseObject(m_outline);
+        if (!m_capFace.IsNull())
+            m_guiDoc->graphicsScene()->eraseObject(m_capFace);
+    }
 }
 
 gp_Dir WidgetSection::baseNormal() const
@@ -456,6 +461,7 @@ void WidgetSection::setSectionOn(bool on)
         m_labelPerimeter->setText("-");
         m_labelEdges->setText("-");
         this->hideOutline();
+        this->hideCapFace();
     }
 
     this->redraw();
@@ -547,10 +553,16 @@ void WidgetSection::recomputeReadout()
     // ONE BRepAlgoAPI_Section pass on a pool thread feeds both the readout and
     // the black outline (same off-thread pattern as the overall-size measure),
     // so the UI never freezes however large the assembly is.
+    // Build the fillable cut face only when Measure is active -- it costs extra
+    // face work per slice, and it is only ever picked in measure mode.
+    const bool wantFaces = m_measureModeActive;
     QPointer<WidgetSection> self(this);
-    QThreadPool::globalInstance()->start([self, comp, pln, gen]{
+    QThreadPool::globalInstance()->start([self, comp, pln, gen, wantFaces]{
         const argos::SectionResult r = argos::computeSection(comp, pln);
-        QMetaObject::invokeMethod(qApp, [self, r, gen]{
+        TopoDS_Shape capFaces;
+        if (wantFaces && r.ok && !r.shape.IsNull())
+            capFaces = argos::buildSectionFaces(r.shape, pln);
+        QMetaObject::invokeMethod(qApp, [self, r, capFaces, gen]{
             if (!self || !self->m_guiDoc)
                 return;   // widget gone, or its document died first (close race)
             self->m_sliceBusy = false;
@@ -562,12 +574,12 @@ void WidgetSection::recomputeReadout()
                     self->recomputeReadout();
                 return;
             }
-            self->applySliceResult(r);
+            self->applySliceResult(r, capFaces);
         });
     });
 }
 
-void WidgetSection::applySliceResult(const argos::SectionResult& result)
+void WidgetSection::applySliceResult(const argos::SectionResult& result, const TopoDS_Shape& capFaces)
 {
     if (result.ok) {
         m_labelPerimeter->setText(QString::number(result.outlineLength, 'f', 2) + " mm");
@@ -580,6 +592,7 @@ void WidgetSection::applySliceResult(const argos::SectionResult& result)
 
     // Cache the slice so re-enabling the outline checkbox needs no re-slice.
     m_lastSectionShape = result.shape;
+    m_lastCapFace = capFaces;
     m_lastSliceGen = m_sliceGen;
 
     if (m_showOutline && m_plane->IsOn() && !result.shape.IsNull()) {
@@ -589,6 +602,13 @@ void WidgetSection::applySliceResult(const argos::SectionResult& result)
         this->hideOutline();
         this->redraw();
     }
+
+    // The pickable cut face -- only while measuring and only when the slice
+    // actually filled a region.
+    if (m_measureModeActive && m_plane->IsOn() && !capFaces.IsNull())
+        this->showCapFace(capFaces);
+    else
+        this->hideCapFace();
 }
 
 void WidgetSection::hideOutline()
@@ -633,26 +653,97 @@ void WidgetSection::setMeasureModeActive(bool on)
         return;
 
     m_measureModeActive = on;
+    if (on && m_plane->IsOn())
+        this->recomputeReadout();   // (re)slice so the pickable cut face is built
+    else if (!on)
+        this->hideCapFace();
+
     this->applyOutlineSelectable();
     this->redraw();
 }
 
-void WidgetSection::applyOutlineSelectable()
+void WidgetSection::showCapFace(const TopoDS_Shape& faces)
 {
-    if (!m_guiDoc || m_outline.IsNull())
+    if (!m_guiDoc || faces.IsNull())
         return;
 
     GraphicsScene* scene = m_guiDoc->graphicsScene();
-    // Always start from a clean slate: the outline must never stay pickable once
-    // the Measure tool closes (it would otherwise steal clicks meant for parts).
-    scene->deactivateObjectSelection(m_outline);
 
-    // Only offer the outline as a pick target while measuring AND while it is
-    // actually shown -- a hidden outline (mid-drag, section off) is not detectable
-    // anyway, and re-activating on every reshow keeps modes after Redisplay().
-    if (m_measureModeActive && m_plane->IsOn() && scene->isObjectVisible(m_outline)) {
-        scene->activateObjectSelection(m_outline, AIS_Shape::SelectionMode(TopAbs_VERTEX));
-        scene->activateObjectSelection(m_outline, AIS_Shape::SelectionMode(TopAbs_EDGE));
+    if (m_capFace.IsNull()) {
+        m_capFace = new AIS_Shape(faces);
+        // Wireframe only: the visible cut fill is already drawn by the clip-plane
+        // capping, so this object contributes a pickable SURFACE without a
+        // competing fill (no z-fighting, no tint). Its boundary edges coincide
+        // with the outline, which is thicker and on top.
+        m_capFace->SetDisplayMode(0);
+        m_capFace->SetColor(Quantity_Color(0.0, 0.0, 0.0, Quantity_TOC_RGB));
+        m_capFace->SetWidth(0.1);
+        // Above the model (its face wins selection over hidden back geometry) but
+        // below the Topmost outline (section lines still win for edge/vertex).
+        m_capFace->SetZLayer(Graphic3d_ZLayerId_Top);
+        auto exemptPlanes = makeOccHandle<Graphic3d_SequenceOfHClipPlane>();
+        exemptPlanes->SetOverrideGlobal(Standard_True);
+        m_capFace->SetClipPlanes(exemptPlanes);
+        scene->addObject(m_capFace, GraphicsScene::AddObjectDisableSelectionMode);
+    }
+    else {
+        m_capFace->SetShape(faces);
+        scene->recomputeObjectPresentation(m_capFace);
+    }
+
+    scene->setObjectVisible(m_capFace, true);
+    this->applyOutlineSelectable();
+    this->redraw();
+}
+
+void WidgetSection::hideCapFace()
+{
+    if (m_guiDoc && !m_capFace.IsNull()) {
+        m_guiDoc->graphicsScene()->setObjectVisible(m_capFace, false);
+        this->applyOutlineSelectable();   // drop its face-selection while hidden
+    }
+}
+
+void WidgetSection::applyOutlineSelectable()
+{
+    if (!m_guiDoc)
+        return;
+
+    GraphicsScene* scene = m_guiDoc->graphicsScene();
+    const bool measuring = m_measureModeActive && m_plane->IsOn();
+
+    // Always start each object from a clean slate: neither the outline nor the
+    // cut face may stay pickable once the Measure tool closes (they would
+    // otherwise steal clicks meant for parts).
+    if (!m_outline.IsNull()) {
+        scene->deactivateObjectSelection(m_outline);
+        // Only offer the outline while measuring AND while it is actually shown --
+        // a hidden outline (mid-drag, section off) is not detectable anyway, and
+        // re-activating on every reshow keeps modes after Redisplay().
+        if (measuring && scene->isObjectVisible(m_outline)) {
+            const int vertexMode = AIS_Shape::SelectionMode(TopAbs_VERTEX);
+            const int edgeMode = AIS_Shape::SelectionMode(TopAbs_EDGE);
+            scene->activateObjectSelection(m_outline, vertexMode);
+            scene->activateObjectSelection(m_outline, edgeMode);
+
+            // The cut lines are 1D and thin, so a click rarely lands pixel-exact
+            // on them and OCCT then detects whatever lies behind instead. The
+            // outline is on the Topmost ZLayer, and OCCT's selection sort ranks
+            // ZLayer above depth (SelectMgr_SortCriterion), so ONCE the line is
+            // detected it always wins over the model behind it -- the only gap is
+            // detection. Fatten its pick tolerance (default 2 px) so the visible
+            // section lines grab easily.
+            scene->setObjectSelectionSensitivity(m_outline, edgeMode, 10);
+            scene->setObjectSelectionSensitivity(m_outline, vertexMode, 12);
+        }
+    }
+
+    if (!m_capFace.IsNull()) {
+        scene->deactivateObjectSelection(m_capFace);
+        // Face pick target so the cross-section AREA can be measured; the outline
+        // (Topmost) still wins for edge/vertex picks on the boundary.
+        if (measuring && scene->isObjectVisible(m_capFace))
+            scene->activateObjectSelection(m_capFace, AIS_Shape::SelectionMode(TopAbs_FACE));
     }
 }
 

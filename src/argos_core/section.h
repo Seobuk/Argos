@@ -72,4 +72,13 @@ SectionResult computeSection(const TopoDS_Shape& shape, const gp_Pln& plane);
 
 std::string to_json(const SectionResult& r, int indent = -1);
 
+// Build planar cross-section face(s) filling the closed loops of a section
+// outline (the edge compound from computeSection), lying on 'plane', with holes
+// resolved (a sliced tube yields an annulus of the correct area, not two
+// disks). Returns a compound of faces in world space, or a null shape when the
+// outline forms no closed region. Never throws. Kept separate from
+// computeSection() so only callers that need the fillable face -- e.g. picking
+// and measuring the cut area -- pay for the extra work.
+TopoDS_Shape buildSectionFaces(const TopoDS_Shape& sectionEdges, const gp_Pln& plane);
+
 } // namespace argos

@@ -79,8 +79,10 @@ private:
     // re-slice, nor discards an in-flight slice of the identical state.
     void settleRecompute();
     // UI-thread continuation of recomputeReadout(): fills the readout labels and
-    // shows/hides the outline from the finished slice.
-    void applySliceResult(const argos::SectionResult& result);
+    // shows/hides the outline (and, while measuring, the pickable cut face) from
+    // the finished slice. 'capFaces' is the filled cross-section face compound,
+    // computed off-thread only when Measure is active (null otherwise).
+    void applySliceResult(const argos::SectionResult& result, const TopoDS_Shape& capFaces = {});
 
     // Collect every displayed BRep shape (minus view-cube and the outline itself)
     // into a compound; returns the number of shapes added.
@@ -89,8 +91,14 @@ private:
     // crisp black outline on top of the capping.
     void showOutline(const TopoDS_Shape& sectionCurves);
     void hideOutline();
-    // (De)activate vertex+edge selection on the outline to match m_measureModeActive
-    // and the outline's current existence/visibility. Safe to call repeatedly.
+    // The filled cross-section face(s), shown (wireframe, no extra fill over the
+    // cap) only while measuring so their surface can be picked to measure the cut
+    // area. Face selection is (de)activated by applyOutlineSelectable().
+    void showCapFace(const TopoDS_Shape& faces);
+    void hideCapFace();
+    // (De)activate selection on the outline (vertex+edge) and the cut face (face)
+    // to match m_measureModeActive and their current existence/visibility. Safe
+    // to call repeatedly.
     void applyOutlineSelectable();
     void redraw();
 
@@ -98,6 +106,7 @@ private:
     GraphicsViewPtr m_view;
     OccHandle<Graphic3d_ClipPlane> m_plane;
     OccHandle<AIS_Shape> m_outline;   // black border traced on the cut section
+    OccHandle<AIS_Shape> m_capFace;   // fillable cut face(s), pickable while measuring
     Bnd_Box m_bndBox;
     Plane m_curPlane = Plane::XY;
     bool m_flipped = false;
@@ -113,6 +122,7 @@ private:
     quint64 m_sliceGen = 0;
     bool m_sliceBusy = false;
     TopoDS_Shape m_lastSectionShape;
+    TopoDS_Shape m_lastCapFace;
     quint64 m_lastSliceGen = 0;
     // Fires a settle-recompute for offset paths that emit neither
     // sliderReleased nor editingFinished (keyboard steps, groove clicks,
