@@ -287,8 +287,12 @@ void WidgetGuiDocument::toggleWidgetSection(bool on)
         m_widgetSection->setRanges(m_guiDoc->graphicsBoundingBox());
     }
 
-    if (m_widgetSection)
+    if (m_widgetSection) {
         m_widgetSection->setSectionOn(on);
+        // Section may be (re)opened while Measure is already active: sync the
+        // outline's pickability to the current Measure state.
+        m_widgetSection->setMeasureModeActive(on && m_btnMeasure && m_btnMeasure->isChecked());
+    }
 
     this->updageWidgetPanelControls(m_widgetSection, m_btnSection);
 }
@@ -317,6 +321,12 @@ void WidgetGuiDocument::toggleWidgetMeasure(bool on)
 
     if (m_widgetMeasure)
         m_widgetMeasure->setMeasureOn(on);
+
+    // Argos: let the section outline become a pick target while measuring, so the
+    // cut cross-section (its edges/vertices) can be measured directly instead of
+    // the click falling through to a hidden back face.
+    if (m_widgetSection)
+        m_widgetSection->setMeasureModeActive(on);
 
     this->updageWidgetPanelControls(m_widgetMeasure, m_btnMeasure);
 }

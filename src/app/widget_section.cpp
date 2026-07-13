@@ -22,6 +22,7 @@
 #include <Quantity_Color.hxx>
 #include <Standard_Version.hxx>
 #include <TopLoc_Location.hxx>
+#include <TopAbs_ShapeEnum.hxx>
 #include <TopoDS_Compound.hxx>
 #include <TopoDS_Shape.hxx>
 #include <gp.hxx>
@@ -622,7 +623,37 @@ void WidgetSection::showOutline(const TopoDS_Shape& sectionCurves)
     }
 
     scene->setObjectVisible(m_outline, true);
+    this->applyOutlineSelectable();
     this->redraw();
+}
+
+void WidgetSection::setMeasureModeActive(bool on)
+{
+    if (m_measureModeActive == on)
+        return;
+
+    m_measureModeActive = on;
+    this->applyOutlineSelectable();
+    this->redraw();
+}
+
+void WidgetSection::applyOutlineSelectable()
+{
+    if (!m_guiDoc || m_outline.IsNull())
+        return;
+
+    GraphicsScene* scene = m_guiDoc->graphicsScene();
+    // Always start from a clean slate: the outline must never stay pickable once
+    // the Measure tool closes (it would otherwise steal clicks meant for parts).
+    scene->deactivateObjectSelection(m_outline);
+
+    // Only offer the outline as a pick target while measuring AND while it is
+    // actually shown -- a hidden outline (mid-drag, section off) is not detectable
+    // anyway, and re-activating on every reshow keeps modes after Redisplay().
+    if (m_measureModeActive && m_plane->IsOn() && scene->isObjectVisible(m_outline)) {
+        scene->activateObjectSelection(m_outline, AIS_Shape::SelectionMode(TopAbs_VERTEX));
+        scene->activateObjectSelection(m_outline, AIS_Shape::SelectionMode(TopAbs_EDGE));
+    }
 }
 
 void WidgetSection::redraw()

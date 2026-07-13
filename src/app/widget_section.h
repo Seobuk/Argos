@@ -43,6 +43,13 @@ public:
     void setSectionOn(bool on);
     void setRanges(const Bnd_Box& box);   // slot for signalGraphicsBoundingBoxChanged
 
+    // Argos: while the Measure tool is active, make the cut outline (the only real
+    // geometry lying on the section plane) pickable so its edges/vertices can be
+    // measured directly -- otherwise a click on the flat cut surface hits nothing
+    // selectable (the cap is not topology) and OCCT falls through to a hidden
+    // back-interior face. WidgetGuiDocument drives this from the Measure toggle.
+    void setMeasureModeActive(bool on);
+
 signals:
     void sizeAdjustmentRequested();
 
@@ -82,6 +89,9 @@ private:
     // crisp black outline on top of the capping.
     void showOutline(const TopoDS_Shape& sectionCurves);
     void hideOutline();
+    // (De)activate vertex+edge selection on the outline to match m_measureModeActive
+    // and the outline's current existence/visibility. Safe to call repeatedly.
+    void applyOutlineSelectable();
     void redraw();
 
     GuiDocument* m_guiDoc = nullptr;
@@ -92,6 +102,7 @@ private:
     Plane m_curPlane = Plane::XY;
     bool m_flipped = false;
     bool m_showOutline = true;
+    bool m_measureModeActive = false;   // Measure tool open -> outline is pickable
 
     // Async slicing state. m_sliceGen identifies the plane/scene state a slice
     // request was made for; anything that invalidates the cut bumps it, so a
