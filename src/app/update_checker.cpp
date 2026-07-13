@@ -62,10 +62,24 @@ void checkForUpdates(QWidget* parent, bool silentIfUpToDate)
         netMgr->deleteLater();
 
         if (reply->error() != QNetworkReply::NoError) {
+            // The in-app check goes through Qt's TLS stack, which on some Windows
+            // machines can't validate GitHub's certificate (antivirus/proxy SSL
+            // inspection, or a Schannel fallback with no OpenSSL). The system
+            // browser uses the OS trust store and downloads fine, so on failure
+            // offer to open the releases page there instead of dead-ending.
             if (!silentIfUpToDate) {
-                QMessageBox::information(
-                    parentGuard, QObject::tr("업데이트 확인 실패"), reply->errorString()
+                const auto answer = QMessageBox::question(
+                    parentGuard,
+                    QObject::tr("업데이트 확인 실패"),
+                    QObject::tr("업데이트 확인에 실패했습니다:\n%1\n\n"
+                                "브라우저에서 다운로드 페이지를 여시겠습니까?")
+                        .arg(reply->errorString())
                 );
+                if (answer == QMessageBox::Yes) {
+                    QDesktopServices::openUrl(
+                        QUrl("https://github.com/Seobuk/Argos/releases/latest")
+                    );
+                }
             }
 
             return;
