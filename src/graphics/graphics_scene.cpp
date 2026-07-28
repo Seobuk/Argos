@@ -146,6 +146,16 @@ void GraphicsScene::addObject(const GraphicsObjectPtr& object, AddObjectFlags fl
             const int defaultDisplayMode = d->m_aisContext->defaultDisplayMode(object);
             d->m_aisContext->SetAutoActivateSelection(false);
             d->m_aisContext->Display(object, defaultDisplayMode, -1, false);
+            // Display(..., selMode = -1, ...) shows the object but does NOT register
+            // it with the selector, and a later AIS_InteractiveContext::Activate()
+            // then silently fails to make it detectable -- MoveTo never picks it.
+            // Load() registers the object (no active mode) so a subsequent
+            // activateObjectSelection() actually takes effect. Without this the
+            // section cut outline/cap face are displayed but never hover/select
+            // (verified against OCCT: Display(-1)+Activate detects nothing, adding
+            // Load(-1) before Activate detects). It is a no-op for helper objects
+            // that never activate a mode (measurement callouts), and safe to repeat.
+            d->m_aisContext->Load(object, -1);
             d->m_aisContext->SetAutoActivateSelection(onEntry_AutoActivateSelection);
         }
         else {
