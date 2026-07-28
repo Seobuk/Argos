@@ -163,6 +163,30 @@ jobs:
               # Mayo_PostBuildCopyRuntimeDLLs (OCCT TK*, Qt6*, 3rd-party deps).
               Get-ChildItem $rel -Filter *.dll | ForEach-Object { Copy-Item $_.FullName $dist -Force }
 
+              # OpenCASCADE 7.9.0's prebuilt *Release* TKernel.dll imports the
+              # *debug* TBB (tbb12_debug.dll) - an upstream quirk of the fougue
+              # binaries. The debug TBB DLLs link the debug CRT (MSVCP140D.dll /
+              # VCRUNTIME140D.dll / ucrtbased.dll), which is NOT redistributable
+              # and is absent on end-user machines, so Argos.exe fails to start
+              # with "MSVCP140D.dll ... 없어 코드 실행을 진행할 수 없습니다".
+              # Overwrite the debug TBB DLLs with their release builds: the
+              # debug-named imports then resolve to release code that needs only
+              # the normal MSVCP140.dll (shipped via the VC++ redistributable).
+              # Release TBB exports the same public ABI TKernel links against.
+              $tbbMap = @{
+                  'tbb12_debug.dll'           = 'tbb12.dll'
+                  'tbbmalloc_debug.dll'       = 'tbbmalloc.dll'
+                  'tbbmalloc_proxy_debug.dll' = 'tbbmalloc_proxy.dll'
+              }
+              foreach ($dbg in $tbbMap.Keys) {
+                  $dbgPath = Join-Path $dist $dbg
+                  $relPath = Join-Path $dist $tbbMap[$dbg]
+                  if ((Test-Path $dbgPath) -and (Test-Path $relPath)) {
+                      Copy-Item $relPath $dbgPath -Force
+                      Write-Host "Replaced debug TBB $dbg with release $($tbbMap[$dbg])"
+                  }
+              }
+
               # Authoritative Qt runtime + plugin deployment (platforms/, styles/, ...).
               # windeployqt prints harmless warnings to stderr; don't let them abort.
               $prevEAP = $ErrorActionPreference

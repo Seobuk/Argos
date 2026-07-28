@@ -58,6 +58,26 @@ if (Test-Path $windeployqt) {
 # Qt6*, vcpkg deps like freetype/zlib/...).
 Get-ChildItem $rel -Filter *.dll | ForEach-Object { Copy-Item $_.FullName $dist -Force }
 
+# OpenCASCADE 7.9.0's prebuilt Release TKernel.dll imports the debug TBB
+# (tbb12_debug.dll), which links the non-redistributable debug CRT
+# (MSVCP140D.dll). On machines without Visual Studio that makes Argos.exe fail
+# to start. Overwrite the debug TBB DLLs with their release builds so the
+# debug-named imports resolve to release code needing only MSVCP140.dll. Release
+# TBB exports the same public ABI TKernel links against.
+$tbbMap = @{
+    'tbb12_debug.dll'           = 'tbb12.dll'
+    'tbbmalloc_debug.dll'       = 'tbbmalloc.dll'
+    'tbbmalloc_proxy_debug.dll' = 'tbbmalloc_proxy.dll'
+}
+foreach ($dbg in $tbbMap.Keys) {
+    $dbgPath = Join-Path $dist $dbg
+    $relPath = Join-Path $dist $tbbMap[$dbg]
+    if ((Test-Path $dbgPath) -and (Test-Path $relPath)) {
+        Copy-Item $relPath $dbgPath -Force
+        Write-Host "Replaced debug TBB $dbg with release $($tbbMap[$dbg])"
+    }
+}
+
 # Qt plugin folders (windeployqt creates these next to the build exe too).
 foreach ($plug in @('platforms','styles','tls','iconengines','imageformats','generic','networkinformation','platforminputcontexts')) {
     $src = Join-Path $rel $plug
