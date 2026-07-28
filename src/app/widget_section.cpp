@@ -20,6 +20,7 @@
 #include <BRep_Builder.hxx>
 #include <Graphic3d_SequenceOfHClipPlane.hxx>
 #include <Graphic3d_ZLayerId.hxx>
+#include <Prs3d_Drawer.hxx>
 #include <Quantity_Color.hxx>
 #include <Standard_Version.hxx>
 #include <TopLoc_Location.hxx>
@@ -678,6 +679,13 @@ void WidgetSection::showCapFace(const TopoDS_Shape& faces)
         m_capFace->SetDisplayMode(0);
         m_capFace->SetColor(Quantity_Color(0.0, 0.0, 0.0, Quantity_TOC_RGB));
         m_capFace->SetWidth(0.1);
+        // Face selection needs a triangulation to make the face INTERIOR pickable
+        // (StdSelect builds a Select3D_SensitiveTriangulation from it); without one
+        // only the boundary is caught. A shaded shape gets meshed for free, but this
+        // object is wireframe-only, so force auto-triangulation on so activating the
+        // FACE mode meshes the (trivial, planar) cut face and the whole cut area can
+        // be picked, not just its border.
+        m_capFace->Attributes()->SetAutoTriangulation(true);
         // Above the model (its face wins selection over hidden back geometry) but
         // below the Topmost outline (section lines still win for edge/vertex).
         m_capFace->SetZLayer(Graphic3d_ZLayerId_Top);

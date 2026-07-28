@@ -36,6 +36,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <utility>
 
 namespace argos {
 
@@ -245,84 +246,118 @@ TopoDS_Shape buildSectionFaces(const TopoDS_Shape& sectionEdges, const gp_Pln& p
         return {};
 
     try {
-        // 1) Stitch the loose section edges into wires. shared=True connects on
-        //    the shared TopoDS_Vertex -- exact for a single BRepAlgoAPI_Section
-        //    result, where loop junctions share vertices.
-        Handle(TopTools_HSequenceOfShape) edgeSeq = new TopTools_HSequenceOfShape;
-        for (TopExp_Explorer ex(sectionEdges, TopAbs_EDGE); ex.More(); ex.Next())
-            edgeSeq->Append(ex.Current());
-        if (edgeSeq->IsEmpty())
-            return {};
+        // Fresh edge sequence from the loose section edges (ConnectEdgesToWires
+        // must not see a sequence a previous attempt may have consumed).
+        auto collectEdges = [&]() {
+            Handle(TopTools_HSequenceOfShape) es = new TopTools_HSequenceOfShape;
+            for (TopExp_Explorer ex(sectionEdges, TopAbs_EDGE); ex.More(); ex.Next())
+                es->Append(ex.Current());
+            return es;
+        };
 
-        Handle(TopTools_HSequenceOfShape) wireSeq;
-        ShapeAnalysis_FreeBounds::ConnectEdgesToWires(
-            edgeSeq, Precision::Confusion(), Standard_True, wireSeq);
-        if (wireSeq.IsNull() || wireSeq->IsEmpty())
-            return {};
+        // Turn a set of connected wires into filled planar faces (holes resolved
+        // by nesting depth). Returns the face compound and how many outer faces
+        // were emitted.
+        auto buildFromWires = [&](const Handle(TopTools_HSequenceOfShape)& wireSeq)
+                -> std::pair<TopoDS_Compound, int> {
+            TopoDS_Compound comp;
+            BRep_Builder builder;
+            builder.MakeCompound(comp);
+            if (wireSeq.IsNull() || wireSeq->IsEmpty())
+                return { comp, 0 };
 
-        // 2) One provisional planar face per closed loop, with its area and an
-        //    interior (centroid) point for containment tests.
-        struct Loop { TopoDS_Wire wire; TopoDS_Face face; gp_Pnt inside; double area = 0; int depth = 0; };
-        std::vector<Loop> loops;
-        for (int i = 1; i <= wireSeq->Length(); ++i) {
-            const TopoDS_Wire w = TopoDS::Wire(wireSeq->Value(i));
-            BRepBuilderAPI_MakeFace mf(plane, w, Standard_True /*onlyPlane*/);
-            if (!mf.IsDone())
-                continue;   // open/degenerate loop -> can't bound a face
-            const TopoDS_Face f = mf.Face();
-            GProp_GProps g;
-            BRepGProp::SurfaceProperties(f, g);
-            const double a = g.Mass();
-            if (a < 1.0e-9)
-                continue;
-            loops.push_back({ w, f, g.CentreOfMass(), a, 0 });
-        }
-        if (loops.empty())
-            return {};
-
-        // 3) Nesting depth = how many larger loops contain this loop's interior
-        //    point. Even depth = solid region (outer), odd = hole.
-        for (std::size_t i = 0; i < loops.size(); ++i) {
-            for (std::size_t j = 0; j < loops.size(); ++j) {
-                if (i == j || loops[j].area <= loops[i].area)
+            // One provisional planar face per closed loop, with its area and an
+            // interior (centroid) point for containment tests.
+            struct Loop { TopoDS_Wire wire; TopoDS_Face face; gp_Pnt inside; double area = 0; int depth = 0; };
+            std::vector<Loop> loops;
+            for (int i = 1; i <= wireSeq->Length(); ++i) {
+                const TopoDS_Wire w = TopoDS::Wire(wireSeq->Value(i));
+                BRepBuilderAPI_MakeFace mf(plane, w, Standard_True /*onlyPlane*/);
+                if (!mf.IsDone())
+                    continue;   // open/degenerate loop -> can't bound a face
+                const TopoDS_Face f = mf.Face();
+                GProp_GProps g;
+                BRepGProp::SurfaceProperties(f, g);
+                const double a = g.Mass();
+                if (a < 1.0e-9)
                     continue;
-                BRepClass_FaceClassifier cls(loops[j].face, loops[i].inside, Precision::Confusion());
-                if (cls.State() == TopAbs_IN)
-                    ++loops[i].depth;
+                loops.push_back({ w, f, g.CentreOfMass(), a, 0 });
             }
-        }
+            if (loops.empty())
+                return { comp, 0 };
 
-        // 4) Build outer faces (even depth) and subtract their immediate holes
-        //    (depth+1 loops contained in them). ponytail: one-parent nesting is
-        //    resolved exactly; an island inside a hole (depth+2) becomes its own
-        //    outer face -- rare in a cross-section and still correct in area.
-        BRep_Builder builder;
-        TopoDS_Compound comp;
-        builder.MakeCompound(comp);
-        int nFaces = 0;
-        for (std::size_t i = 0; i < loops.size(); ++i) {
-            if (loops[i].depth % 2 != 0)
-                continue;   // hole: emitted as a hole of its parent
-            BRepBuilderAPI_MakeFace mf(plane, loops[i].wire, Standard_True);
-            if (!mf.IsDone())
-                continue;
-            for (std::size_t j = 0; j < loops.size(); ++j) {
-                if (loops[j].depth != loops[i].depth + 1 || loops[j].area >= loops[i].area)
-                    continue;
-                BRepClass_FaceClassifier cls(loops[i].face, loops[j].inside, Precision::Confusion());
-                if (cls.State() == TopAbs_IN) {
-                    TopoDS_Wire hole = loops[j].wire;
-                    hole.Reverse();
-                    mf.Add(hole);
+            // Nesting depth = how many larger loops contain this loop's interior
+            // point. Even depth = solid region (outer), odd = hole.
+            for (std::size_t i = 0; i < loops.size(); ++i) {
+                for (std::size_t j = 0; j < loops.size(); ++j) {
+                    if (i == j || loops[j].area <= loops[i].area)
+                        continue;
+                    BRepClass_FaceClassifier cls(loops[j].face, loops[i].inside, Precision::Confusion());
+                    if (cls.State() == TopAbs_IN)
+                        ++loops[i].depth;
                 }
             }
-            if (mf.IsDone()) {
-                builder.Add(comp, mf.Face());
-                ++nFaces;
+
+            // Build outer faces (even depth) and subtract their immediate holes
+            // (depth+1 loops contained in them). ponytail: one-parent nesting is
+            // resolved exactly; an island inside a hole (depth+2) becomes its own
+            // outer face -- rare in a cross-section and still correct in area.
+            int nFaces = 0;
+            for (std::size_t i = 0; i < loops.size(); ++i) {
+                if (loops[i].depth % 2 != 0)
+                    continue;   // hole: emitted as a hole of its parent
+                BRepBuilderAPI_MakeFace mf(plane, loops[i].wire, Standard_True);
+                if (!mf.IsDone())
+                    continue;
+                for (std::size_t j = 0; j < loops.size(); ++j) {
+                    if (loops[j].depth != loops[i].depth + 1 || loops[j].area >= loops[i].area)
+                        continue;
+                    BRepClass_FaceClassifier cls(loops[i].face, loops[j].inside, Precision::Confusion());
+                    if (cls.State() == TopAbs_IN) {
+                        TopoDS_Wire hole = loops[j].wire;
+                        hole.Reverse();
+                        mf.Add(hole);
+                    }
+                }
+                if (mf.IsDone()) {
+                    builder.Add(comp, mf.Face());
+                    ++nFaces;
+                }
             }
+
+            return { comp, nFaces };
+        };
+
+        // Stitch the loose section edges into wires, then fill them. Two passes:
+        //   shared=True  -- connects on the shared TopoDS_Vertex; fast and exact
+        //                   for a simple single-solid cut where loop junctions
+        //                   share vertices.
+        //   shared=False -- connects by geometric proximity; needed when slicing
+        //                   an assembly compound (many parts, pcurve-approximated
+        //                   section edges) where coincident junction endpoints are
+        //                   NOT the same vertex, so the shared pass leaves loops
+        //                   open and yields no fillable face. Only reached when the
+        //                   exact pass produced nothing, so it never changes a good
+        //                   result -- it just recovers the cut face on assemblies.
+        for (const Standard_Boolean shared : { Standard_True, Standard_False }) {
+            Handle(TopTools_HSequenceOfShape) edgeSeq = collectEdges();
+            if (edgeSeq->IsEmpty())
+                return {};
+
+            // Exact pass matches on the shared vertex (tolerance irrelevant). The
+            // geometric fallback must bridge the tiny gaps approximation leaves at
+            // loop junctions, so it uses a looser tolerance -- still ~1000x below
+            // any real feature spacing, so separate loops are never fused.
+            const double tol = shared ? Precision::Confusion() : 1.0e-4;
+            Handle(TopTools_HSequenceOfShape) wireSeq;
+            ShapeAnalysis_FreeBounds::ConnectEdgesToWires(edgeSeq, tol, shared, wireSeq);
+
+            auto [comp, nFaces] = buildFromWires(wireSeq);
+            if (nFaces > 0)
+                return comp;
         }
 
-        return nFaces > 0 ? TopoDS_Shape(comp) : TopoDS_Shape();
+        return {};
     }
     catch (const Standard_Failure&) {
         return {};
