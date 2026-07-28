@@ -733,17 +733,34 @@ void WidgetSection::applyOutlineSelectable()
             // detected it always wins over the model behind it -- the only gap is
             // detection. Fatten its pick tolerance (default 2 px) so the visible
             // section lines grab easily.
-            scene->setObjectSelectionSensitivity(m_outline, edgeMode, 10);
-            scene->setObjectSelectionSensitivity(m_outline, vertexMode, 12);
+            scene->setObjectSelectionSensitivity(m_outline, edgeMode, 14);
+            scene->setObjectSelectionSensitivity(m_outline, vertexMode, 16);
         }
     }
 
     if (!m_capFace.IsNull()) {
         scene->deactivateObjectSelection(m_capFace);
-        // Face pick target so the cross-section AREA can be measured; the outline
-        // (Topmost) still wins for edge/vertex picks on the boundary.
-        if (measuring && scene->isObjectVisible(m_capFace))
-            scene->activateObjectSelection(m_capFace, AIS_Shape::SelectionMode(TopAbs_FACE));
+        // The cut cross-section is a real BRep face, so its OWN vertices and edges
+        // are far more reliable pick targets than the thin, floating outline
+        // curves -- a face-backed edge grabs even when the click misses the 1D
+        // line by several pixels. Offer all three sub-shapes so the cut section
+        // can be measured by picking a line: click the boundary -> the cut EDGE
+        // (length / distance), click a corner -> its VERTEX, click the interior ->
+        // the FACE (area). The Topmost outline still wins ties on the boundary,
+        // and both objects expose the same edge geometry, so the measured value
+        // is identical either way.
+        if (measuring && scene->isObjectVisible(m_capFace)) {
+            const int vertexMode = AIS_Shape::SelectionMode(TopAbs_VERTEX);
+            const int edgeMode = AIS_Shape::SelectionMode(TopAbs_EDGE);
+            const int faceMode = AIS_Shape::SelectionMode(TopAbs_FACE);
+            scene->activateObjectSelection(m_capFace, vertexMode);
+            scene->activateObjectSelection(m_capFace, edgeMode);
+            scene->activateObjectSelection(m_capFace, faceMode);
+            // Same generous tolerance as the outline so the cut lines grab without
+            // pixel-exact aim; the face interior stays the area pick target.
+            scene->setObjectSelectionSensitivity(m_capFace, edgeMode, 14);
+            scene->setObjectSelectionSensitivity(m_capFace, vertexMode, 16);
+        }
     }
 }
 
