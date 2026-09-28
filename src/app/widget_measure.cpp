@@ -19,6 +19,7 @@
 #include "../argos_core/measure.h"
 
 #include <AIS_Shape.hxx>
+#include <AIS_TextLabel.hxx>
 #include <Bnd_Box.hxx>
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepBndLib.hxx>
@@ -31,7 +32,12 @@
 #include <TopoDS_Shape.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Trsf.hxx>
+#include <Image_PixMap.hxx>
+#include <V3d_View.hxx>
 
+#include <QtCore/QDateTime>
+#include <QtCore/QFile>
+#include <QtCore/QFileInfo>
 #include <QtCore/QPointer>
 #include <QtCore/QSignalBlocker>
 #include <QtCore/QString>
@@ -42,16 +48,21 @@
 #include <QtGui/QColor>
 #include <QtGui/QFontDatabase>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QImage>
+#include <QtGui/QPainter>
+#include <QtGui/QPdfWriter>
 #include <QtGui/QShortcut>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QCheckBox>
 #include <QtWidgets/QComboBox>
+#include <QtWidgets/QFileDialog>
 #include <QtWidgets/QFormLayout>
 #include <QtWidgets/QFrame>
 #include <QtWidgets/QGridLayout>
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QListWidget>
+#include <QtWidgets/QMessageBox>
 #include <QtWidgets/QMenu>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QVBoxLayout>
@@ -440,6 +451,20 @@ WidgetMeasure::WidgetMeasure(GuiDocument* guiDoc, QWidget* parent)
         actionRow->addWidget(btnCopyValue);
         actionRow->addWidget(btnCopyJson);
         optionLayout->addLayout(actionRow);
+
+        // Argos: pin the current measurement into the view / export a report
+        auto pinRow = new QHBoxLayout;
+        pinRow->setContentsMargins(0, 0, 0, 0);
+        m_btnPin = new QPushButton(tr("📌 고정"), this);
+        m_btnPin->setToolTip(tr("현재 측정 치수를 3D 뷰에 고정합니다. 선택을 바꿔도 남아 있어 여러 치수를 한 화면에 모을 수 있습니다 (P)"));
+        auto btnExport = new QPushButton(tr("내보내기…"), this);
+        btnExport->setToolTip(tr("고정한 측정(없으면 현재 측정)을 PDF 보고서 / PNG 이미지 / JSON으로 저장합니다"));
+        pinRow->addWidget(m_btnPin);
+        pinRow->addStretch(1);
+        pinRow->addWidget(btnExport);
+        optionLayout->addLayout(pinRow);
+        QObject::connect(m_btnPin, &QPushButton::clicked, this, [this]{ this->pinCurrentMeasure(); });
+        QObject::connect(btnExport, &QPushButton::clicked, this, [this]{ this->exportMeasures(); });
     }
     m_ui->layout_Main->addWidget(optionRow, 5, 0, 1, 2);
 
@@ -478,6 +503,24 @@ WidgetMeasure::WidgetMeasure(GuiDocument* guiDoc, QWidget* parent)
     m_historyList->setContextMenuPolicy(Qt::CustomContextMenu);
     m_ui->layout_Main->addWidget(historyHeader, 7, 0, 1, 2);
     m_ui->layout_Main->addWidget(m_historyList, 8, 0, 1, 2);
+
+    // Argos: pinned measurements ("고정된 측정" + "고정 해제" button)
+    auto pinnedHeader = new QWidget(this);
+    auto pinnedHeaderLayout = new QHBoxLayout(pinnedHeader);
+    pinnedHeaderLayout->setContentsMargins(0, 0, 0, 0);
+    pinnedHeaderLayout->addWidget(new QLabel(tr("고정된 측정"), pinnedHeader));
+    pinnedHeaderLayout->addStretch(1);
+    auto btnClearPinned = new QPushButton(tr("모두 해제"), pinnedHeader);
+    btnClearPinned->setToolTip(tr("3D 뷰에 고정한 측정을 모두 지웁니다"));
+    pinnedHeaderLayout->addWidget(btnClearPinned);
+
+    m_pinnedList = new QListWidget(this);
+    m_pinnedList->setMaximumHeight(120);
+    m_pinnedList->setToolTip(tr("우클릭: 값 복사 / 고정 해제"));
+    m_pinnedList->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_ui->layout_Main->addWidget(pinnedHeader, 9, 0, 1, 2);
+    m_ui->layout_Main->addWidget(m_pinnedList, 10, 0, 1, 2);
+    QObject::connect(btnClearPinned, &QPushButton::clicked, this, [this]{ this->clearPinnedMeasures(); });
 
     QObject::connect(m_checkShowXyz, &QCheckBox::toggled, this, [this]{ this->recompute(false); });
     QObject::connect(m_checkPointToPoint, &QCheckBox::toggled, this, [this]{ this->recompute(false); });
@@ -522,6 +565,25 @@ WidgetMeasure::WidgetMeasure(GuiDocument* guiDoc, QWidget* parent)
     auto scCopy = new QShortcut(QKeySequence::Copy, this);
     scCopy->setContext(Qt::WidgetWithChildrenShortcut);
     QObject::connect(scCopy, &QShortcut::activated, this, [=]{ copyText(m_lastShort); });
+    auto scPin = new QShortcut(QKeySequence(Qt::Key_P), this);
+    scPin->setContext(Qt::WidgetWithChildrenShortcut);
+    QObject::connect(scPin, &QShortcut::activated, this, [this]{ this->pinCurrentMeasure(); });
+
+    QObject::connect(m_pinnedList, &QListWidget::customContextMenuRequested, this,
+                     [=](const QPoint& pos) {
+        QListWidgetItem* item = m_pinnedList->itemAt(pos);
+        if (!item)
+            return;
+
+        QMenu menu(this);
+        QAction* actCopy = menu.addAction(tr("복사"));
+        QAction* actUnpin = menu.addAction(tr("고정 해제"));
+        QAction* act = menu.exec(m_pinnedList->viewport()->mapToGlobal(pos));
+        if (act == actCopy)
+            copyText(item->text());
+        else if (act == actUnpin)
+            this->unpinMeasure(item->data(Qt::UserRole).toInt());
+    });
 
     this->updateMessagePanel();
 }
@@ -1100,6 +1162,9 @@ void WidgetMeasure::updateMessagePanel()
         delete item;
     }
 
+    if (m_btnPin)
+        m_btnPin->setEnabled(m_hasResult);
+
     QWidget* host = m_ui->widget_Message;
     QVBoxLayout* root = m_ui->layout_Message;
     root->setSpacing(8);
@@ -1300,6 +1365,274 @@ const WidgetMeasure::GraphicsOwner_MeasureDisplay* WidgetMeasure::findLink(const
         [=](const GraphicsOwner_MeasureDisplay& link) { return link.gfxOwner == owner; }
     );
     return itFound != m_vecLinkGfxOwnerMeasure.end() ? &(*itFound) : nullptr;
+}
+
+void WidgetMeasure::pinCurrentMeasure()
+{
+    if (!m_hasResult)
+        return;
+
+    auto gfxScene = m_guiDoc->graphicsScene();
+    PinnedMeasure pin;
+    pin.id = m_nextPinId++;
+    pin.result = m_lastResult;
+    pin.shortText = m_lastShort;
+    // Take ownership of the live callout so recompute()/clearAllMeasureDisplays()
+    // no longer erases it; its graphics objects simply stay in the scene.
+    pin.displays = std::move(m_vecMeasureDisplay);
+    m_vecMeasureDisplay.clear();
+    m_vecLinkGfxOwnerMeasure.clear();
+
+    // Anchor for the "#n" tag: the result's own geometry when it has some,
+    // otherwise the centre of the selected sub-shapes.
+    const argos::MeasureResult& r = pin.result;
+    std::optional<gp_Pnt> anchor;
+    if (r.point && r.point2)
+        anchor = gp_Pnt((r.point->x + r.point2->x) / 2, (r.point->y + r.point2->y) / 2, (r.point->z + r.point2->z) / 2);
+    else if (r.point)
+        anchor = gp_Pnt(r.point->x, r.point->y, r.point->z);
+    else if (r.bboxMax)
+        anchor = gp_Pnt(r.bboxMax->x, r.bboxMax->y, r.bboxMax->z);
+    if (!anchor) {
+        Bnd_Box box;
+        for (const GraphicsOwnerPtr& owner : m_vecSelectedOwner) {
+            const TopoDS_Shape s = ownerToShape(owner);
+            if (!s.IsNull())
+                BRepBndLib::Add(s, box);
+        }
+        if (!box.IsVoid())
+            anchor = BndBoxCoords::get(box).center();
+    }
+
+    if (anchor) {
+        // Results without a Mayo callout (sums, cylinder faces...) carry their
+        // value on the tag itself so every pin is readable in the view/report.
+        const QString tagText = pin.displays.empty() ?
+                    QString("#%1  %2").arg(pin.id).arg(pin.shortText) :
+                    QString("#%1").arg(pin.id);
+        OccHandle<AIS_TextLabel> tag = new AIS_TextLabel;
+        tag->SetPosition(*anchor);
+        tag->SetText(to_OccExtString(tagText));
+        tag->SetZLayer(Graphic3d_ZLayerId_Topmost);
+        tag->SetDisplayType(Aspect_TODT_SUBTITLE);
+        tag->SetColorSubTitle(Quantity_Color(0.85, 0.45, 0.05, Quantity_TOC_RGB));
+        tag->SetColor(Quantity_NOC_WHITE);
+        tag->SetHeight(16. * this->devicePixelRatioF());
+        gfxScene->addObject(tag, GraphicsScene::AddObjectDisableSelectionMode);
+        pin.gfxTag = tag;
+    }
+
+    auto item = new QListWidgetItem(QString("#%1  %2").arg(pin.id).arg(pin.shortText), m_pinnedList);
+    item->setData(Qt::UserRole, pin.id);
+    m_vecPinned.push_back(std::move(pin));
+
+    // Free the selection for the next measurement; the pinned callout stays.
+    // clearSelection() only signals when something was selected (not the case
+    // for "전체 크기 측정"), so reset the result state explicitly as well.
+    gfxScene->clearSelection();
+    m_vecSelectedOwner.clear();
+    m_hasResult = false;
+    m_resultText.clear();
+    m_lastShort.clear();
+    m_lastJson.clear();
+    gfxScene->redraw();
+    this->updateMessagePanel();
+}
+
+void WidgetMeasure::unpinMeasure(int pinId)
+{
+    auto it = std::find_if(m_vecPinned.begin(), m_vecPinned.end(),
+                           [=](const PinnedMeasure& p) { return p.id == pinId; });
+    if (it == m_vecPinned.end())
+        return;
+
+    auto gfxScene = m_guiDoc->graphicsScene();
+    for (const IMeasureDisplayPtr& disp : it->displays) {
+        foreachGraphicsObject(disp, [&](const GraphicsObjectPtr& gfxObject) {
+            gfxScene->eraseObject(gfxObject);
+        });
+    }
+    if (it->gfxTag)
+        gfxScene->eraseObject(it->gfxTag);
+
+    m_vecPinned.erase(it);
+    for (int i = 0; i < m_pinnedList->count(); ++i) {
+        if (m_pinnedList->item(i)->data(Qt::UserRole).toInt() == pinId) {
+            delete m_pinnedList->takeItem(i);
+            break;
+        }
+    }
+
+    gfxScene->redraw();
+}
+
+void WidgetMeasure::clearPinnedMeasures()
+{
+    std::vector<int> ids;
+    for (const PinnedMeasure& p : m_vecPinned)
+        ids.push_back(p.id);
+
+    for (int id : ids)
+        this->unpinMeasure(id);
+
+    m_nextPinId = 1;
+}
+
+QImage WidgetMeasure::captureViewImage() const
+{
+    const OccHandle<V3d_View>& view = m_guiDoc->v3dView();
+    if (view.IsNull() || view->Window().IsNull())
+        return {};
+
+    // Render at 2x the on-screen size (capped) so the report stays sharp.
+    Standard_Integer w = 0, h = 0;
+    view->Window()->Size(w, h);
+    const double scale = std::min(2.0, 4096.0 / std::max<Standard_Integer>({ w, h, 1 }));
+    Image_PixMap pix;
+    pix.SetTopDown(true);
+    if (!view->ToPixMap(pix, int(w * scale), int(h * scale), Graphic3d_BT_RGBA, true))
+        return {};
+
+    const QImage img(pix.Data(), int(pix.Width()), int(pix.Height()), int(pix.SizeRowBytes()),
+                     QImage::Format_RGBA8888);
+    return img.copy(); // detach from 'pix' buffer
+}
+
+void WidgetMeasure::exportMeasures()
+{
+    // Rows to export: the pins, or the current measurement when nothing is pinned.
+    struct Row { QString id; QString text; QString detail; const argos::MeasureResult* result; };
+    std::vector<Row> rows;
+    auto detailOf = [](const argos::MeasureResult& r) {
+        QStringList parts;
+        if (r.delta)
+            parts << QString("ΔX %1  ΔY %2  ΔZ %3").arg(num(r.delta->x), num(r.delta->y), num(r.delta->z));
+        if (r.radius)
+            parts << QString("R %1").arg(num(*r.radius));
+        if (r.bboxSize)
+            parts << QString("%1 × %2 × %3 mm").arg(num(r.bboxSize->x), num(r.bboxSize->y), num(r.bboxSize->z));
+        return parts.join("   ");
+    };
+    for (const PinnedMeasure& p : m_vecPinned)
+        rows.push_back({ QString("#%1").arg(p.id), p.shortText, detailOf(p.result), &p.result });
+    if (rows.empty() && m_hasResult)
+        rows.push_back({ QString("-"), m_lastShort, detailOf(m_lastResult), &m_lastResult });
+
+    if (rows.empty()) {
+        QMessageBox::information(this, tr("내보내기"), tr("내보낼 측정이 없습니다. 먼저 측정하거나 📌 고정하세요."));
+        return;
+    }
+
+    const QString docName = to_QString(m_guiDoc->document()->name());
+    const QString baseName = QFileInfo(docName).completeBaseName();
+    const QString pdfFilter = tr("PDF 보고서 (*.pdf)");
+    const QString pngFilter = tr("PNG 이미지 (*.png)");
+    const QString jsonFilter = tr("JSON (*.json)");
+    QString selectedFilter = pdfFilter;
+    QString fileName = QFileDialog::getSaveFileName(
+                this, tr("측정 내보내기"),
+                (baseName.isEmpty() ? QString("measure") : baseName) + "_measure.pdf",
+                QStringList{ pdfFilter, pngFilter, jsonFilter }.join(";;"),
+                &selectedFilter);
+    if (fileName.isEmpty())
+        return;
+
+    // Honor the chosen filter when the user typed a name without extension.
+    QString ext = QFileInfo(fileName).suffix().toLower();
+    if (ext != "pdf" && ext != "png" && ext != "json") {
+        ext = selectedFilter == pngFilter ? "png" : (selectedFilter == jsonFilter ? "json" : "pdf");
+        fileName += "." + ext;
+    }
+
+    bool ok = false;
+    if (ext == "json") {
+        std::string json = "[";
+        for (size_t i = 0; i < rows.size(); ++i) {
+            if (i)
+                json += ",";
+            json += "\n  " + argos::to_json(*rows[i].result);
+        }
+        json += "\n]\n";
+        QFile file(fileName);
+        ok = file.open(QIODevice::WriteOnly | QIODevice::Truncate)
+                && file.write(json.data(), qint64(json.size())) == qint64(json.size());
+    }
+    else {
+        const QImage img = this->captureViewImage();
+        if (ext == "png") {
+            ok = !img.isNull() && img.save(fileName, "PNG");
+        }
+        else {
+            QPdfWriter pdf(fileName);
+            pdf.setPageSize(QPageSize(QPageSize::A4));
+            pdf.setPageOrientation(QPageLayout::Landscape);
+            pdf.setPageMargins(QMarginsF(12, 12, 12, 12), QPageLayout::Millimeter);
+            pdf.setResolution(150);
+            pdf.setTitle(tr("Argos 측정 보고서"));
+            pdf.setCreator("Argos");
+
+            QPainter painter;
+            ok = painter.begin(&pdf);
+            if (ok) {
+                const int pageW = pdf.width();
+                const int pageH = pdf.height();
+                const int lineH = int(pdf.resolution() * 0.22);
+                QFont font = this->font();
+                int y = 0;
+
+                font.setPointSizeF(16);
+                font.setBold(true);
+                painter.setFont(font);
+                painter.drawText(QRect(0, y, pageW, lineH * 2), Qt::AlignLeft | Qt::AlignVCenter,
+                                 tr("Argos 측정 보고서"));
+                font.setPointSizeF(9);
+                font.setBold(false);
+                painter.setFont(font);
+                painter.setPen(QColor(110, 110, 110));
+                painter.drawText(QRect(0, y, pageW, lineH * 2), Qt::AlignRight | Qt::AlignVCenter,
+                                 QString("%1   ·   %2").arg(docName, QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm")));
+                painter.setPen(Qt::black);
+                y += lineH * 2 + lineH / 2;
+
+                if (!img.isNull()) {
+                    const QSize fit = img.size().scaled(pageW, int(pageH * 0.62), Qt::KeepAspectRatio);
+                    const QRect target((pageW - fit.width()) / 2, y, fit.width(), fit.height());
+                    painter.drawImage(target, img);
+                    painter.setPen(QColor(200, 200, 200));
+                    painter.drawRect(target);
+                    painter.setPen(Qt::black);
+                    y += fit.height() + lineH;
+                }
+
+                const int colId = int(pageW * 0.06);
+                const int colText = int(pageW * 0.40);
+                auto drawRow = [&](const QString& a, const QString& b, const QString& c, bool header) {
+                    if (y + lineH > pageH) {
+                        pdf.newPage();
+                        y = 0;
+                    }
+                    font.setBold(header);
+                    painter.setFont(font);
+                    const int flags = Qt::AlignLeft | Qt::AlignVCenter;
+                    painter.drawText(QRect(0, y, colId, lineH), flags, a);
+                    painter.drawText(QRect(colId, y, colText, lineH), flags, b);
+                    painter.drawText(QRect(colId + colText, y, pageW - colId - colText, lineH), flags, c);
+                    y += lineH;
+                    painter.setPen(QColor(220, 220, 220));
+                    painter.drawLine(0, y, pageW, y);
+                    painter.setPen(Qt::black);
+                };
+                drawRow(tr("번호"), tr("측정"), tr("상세"), true);
+                for (const Row& row : rows)
+                    drawRow(row.id, row.text, row.detail, false);
+
+                ok = painter.end();
+            }
+        }
+    }
+
+    if (!ok)
+        QMessageBox::critical(this, tr("내보내기"), tr("'%1' 저장에 실패했습니다.").arg(fileName));
 }
 
 } // namespace Mayo
