@@ -26,7 +26,9 @@ Turn the tool on and **click vertices, edges and faces in any mix (no mode switc
 Just **hovering** an entity shows its length / area / diameter live, with **zero clicks**.
 
 - Color-coded selection chips, a **large value card**, a colored ΔX/ΔY/ΔZ grid, secondary info (radius / center / perimeter…)
-- Copy value / copy JSON / clear selection, measurement history, shortcuts (`M` · `Esc` · `Ctrl+C`)
+- Copy value / copy JSON / clear selection, measurement history, shortcuts (`M` · `Esc` · `Ctrl+C` · `P`)
+- **📌 Pin measurements**: keep dimensions in the 3D view with numbered tags to lay out several at once
+- **Export**: save pinned measurements as a **PDF report** (view snapshot + dimension table) / PNG / JSON
 
 ![Measure](docs/images/measure.png)
 

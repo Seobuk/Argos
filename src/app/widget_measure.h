@@ -14,12 +14,14 @@
 #include <Bnd_Box.hxx>
 
 #include <QtWidgets/QWidget>
+#include <list>
 #include <memory>
 #include <optional>
 #include <vector>
 
 class QCheckBox;
 class QComboBox;
+class QImage;
 class QListWidget;
 class QPushButton;
 
@@ -85,6 +87,17 @@ private:
 
     void updateMessagePanel();
 
+    // Argos: pinned measurements. "고정" keeps the current measurement's 3D
+    // callout in the view (plus a numbered tag) after the selection moves on, so
+    // several dimensions can be laid out and then exported as one report.
+    void pinCurrentMeasure();
+    void unpinMeasure(int pinId);
+    void clearPinnedMeasures();
+    // Export pinned measurements (or the current one when nothing is pinned):
+    // .pdf = view snapshot + table, .png = view snapshot, .json = raw results.
+    void exportMeasures();
+    QImage captureViewImage() const;
+
     using IMeasureDisplayPtr = std::unique_ptr<IMeasureDisplay>;
     void eraseMeasureDisplay(const IMeasureDisplay* measure);
     // Argos: SolidWorks-style set-based measure -> erase all current displays
@@ -112,6 +125,19 @@ private:
     QString m_lastJson;     // Argos: JSON of the last result (for "JSON 복사")
     argos::MeasureResult m_lastResult;  // Argos: structured result driving the card panel
     bool m_hasResult = false;           // Argos: true when m_lastResult is valid
+
+    // Argos: pinned measurements (see pinCurrentMeasure())
+    struct PinnedMeasure {
+        int id = 0;
+        argos::MeasureResult result;
+        QString shortText;
+        std::vector<IMeasureDisplayPtr> displays;   // callout moved out of m_vecMeasureDisplay
+        GraphicsObjectPtr gfxTag;                    // "#id" label in the 3D view
+    };
+    std::list<PinnedMeasure> m_vecPinned;   // list: PinnedMeasure is move-only
+    int m_nextPinId = 1;
+    QListWidget* m_pinnedList = nullptr;
+    QPushButton* m_btnPin = nullptr;
 
     // Argos: exact overall bounding box, cached so the CPU-heavy exact-surface
     // computation runs at most once per document (and off the UI thread). Reset
